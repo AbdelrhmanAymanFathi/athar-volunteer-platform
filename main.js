@@ -24,6 +24,9 @@ let adminSyncHandler = null;
 /** كلية الفعاليات المعروضة حالياً */
 let currentCollegeForEvents = "";
 
+/** يمنع حلقة لا نهائية عند مزامنة location.hash برمجياً */
+let routerSuppressHash = false;
+
 function showNotification(message, duration = 4000) {
     const toast = document.getElementById("notification-toast");
     const messageEl = document.getElementById("notification-message");
@@ -291,23 +294,58 @@ function updateNavForRole() {
     }
 }
 
-async function handleAuth(e) {
-    e.preventDefault();
-    const fullname = document.getElementById("reg-fullname").value.trim();
-    const names = fullname.split(/\s+/);
-    if (names.length < 3) {
-        showNotification("مطلوب على الأقل ثلاثة أسماء");
-        return;
+function getAuthPassword() {
+    const el = document.getElementById("login-password");
+    return el ? el.value : "";
+}
+
+function getAuthMode() {
+    const w = document.getElementById("login-wrapper");
+    return w && w.dataset.authMode === "register" ? "register" : "login";
+}
+
+function setAuthMode(mode) {
+    const wrap = document.getElementById("login-wrapper");
+    const extra = document.getElementById("reg-extra-fields");
+    const tabLogin = document.getElementById("tab-login");
+    const tabRegister = document.getElementById("tab-register");
+    const btn = document.getElementById("auth-submit-btn");
+    if (!wrap || !extra) return;
+
+    const isRegister = mode === "register";
+    wrap.dataset.authMode = isRegister ? "register" : "login";
+    extra.hidden = !isRegister;
+
+    if (tabLogin) {
+        tabLogin.classList.toggle("auth-tab--active", !isRegister);
+        tabLogin.setAttribute("aria-selected", !isRegister ? "true" : "false");
+    }
+    if (tabRegister) {
+        tabRegister.classList.toggle("auth-tab--active", isRegister);
+        tabRegister.setAttribute("aria-selected", isRegister ? "true" : "false");
+    }
+    if (btn) {
+        btn.textContent = isRegister ? "إنشاء حساب" : "تسجيل الدخول";
     }
 
+    const pw = document.getElementById("login-password");
+    if (pw) {
+        pw.setAttribute("autocomplete", isRegister ? "new-password" : "current-password");
+    }
+}
+
+async function handleAuthSubmit(e) {
+    e.preventDefault();
+    if (getAuthMode() === "register") {
+        await handleRegister();
+    } else {
+        await handleLogin();
+    }
+}
+
+async function handleLogin() {
     const email = document.getElementById("reg-email").value.trim();
-    const passwordInput = document.querySelector(
-        "#login-wrapper input[type='password']"
-    );
-    const password = passwordInput ? passwordInput.value : "";
-    const phone = document.getElementById("reg-phone").value;
-    const dob = document.getElementById("reg-dob").value;
-    const role = resolveRoleFromEmail(email);
+    const password = getAuthPassword();
 
     if (!email) {
         showNotification("أدخلي البريد الجامعي.");
@@ -326,29 +364,17 @@ async function handleAuth(e) {
         const existing = findUserByEmail(db, email);
 
         if (!existing) {
-            const uid = newUid();
-            const row = {
-                ...buildUserPayload(uid, fullname, email, phone, dob, role),
-                pwdHash,
-            };
-            db.users.push(row);
-            await saveDb(db);
-            userData = toPublicUser(row);
-        } else {
-            if (existing.pwdHash !== pwdHash) {
-                showNotification("البريد مسجّل مسبقاً وكلمة المرور غير صحيحة.");
-                return;
-            }
-            Object.assign(existing, {
-                name: fullname,
-                phone,
-                dob,
-                role,
-            });
-            normalizeUserRow(existing);
-            await saveDb(db);
-            userData = toPublicUser(existing);
+            showNotification(
+                "لا يوجد حساب بهذا البريد. أنشئي حساباً من «تسجيل جديد»."
+            );
+            return;
         }
+        if (existing.pwdHash !== pwdHash) {
+            showNotification("كلمة المرور غير صحيحة.");
+            return;
+        }
+
+        userData = toPublicUser(existing);
 
         if (userData && userData.role !== "admin") {
             subscribeCurrentUserHours(userData.uid);
@@ -360,7 +386,78 @@ async function handleAuth(e) {
     } catch (err) {
         console.error(err);
         showNotification(
-            "تعذّر إكمال التسجيل. تأكدي أن المتصفح يدعم IndexedDB وأن التخزين غير محظور."
+            "تعذّر تسجيل الدخول. تأكدي أن المتصفح يدعم IndexedDB."
+        );
+    } finally {
+        showLoader(false);
+    }
+}
+
+async function handleRegister() {
+    const fullname = document.getElementById("reg-fullname").value.trim();
+    const names = fullname.split(/\s+/);
+    if (names.length < 3) {
+        showNotification("مطلوب على الأقل ثلاثة أسماء");
+        return;
+    }
+
+    const email = document.getElementById("reg-email").value.trim();
+    const password = getAuthPassword();
+    const phone = document.getElementById("reg-phone").value.trim();
+    const dob = document.getElementById("reg-dob").value;
+    const role = resolveRoleFromEmail(email);
+
+    if (!email) {
+        showNotification("أدخلي البريد الجامعي.");
+        return;
+    }
+    if (!password || password.length < 6) {
+        showNotification("كلمة المرور مطلوبة ولا تقل عن 6 أحرف.");
+        return;
+    }
+    if (!phone) {
+        showNotification("أدخلي رقم الجوال.");
+        return;
+    }
+    if (!dob) {
+        showNotification("أدخلي تاريخ الميلاد.");
+        return;
+    }
+
+    showLoader(true);
+
+    try {
+        const pwdHash = await hashPassword(password);
+        const db = await loadDb();
+        const existing = findUserByEmail(db, email);
+
+        if (existing) {
+            showNotification(
+                "البريد مسجّل مسبقاً. استخدمي «تسجيل الدخول»."
+            );
+            return;
+        }
+
+        const uid = newUid();
+        const row = {
+            ...buildUserPayload(uid, fullname, email, phone, dob, role),
+            pwdHash,
+        };
+        db.users.push(row);
+        await saveDb(db);
+        userData = toPublicUser(row);
+
+        if (userData && userData.role !== "admin") {
+            subscribeCurrentUserHours(userData.uid);
+        } else {
+            clearHoursSubscription();
+        }
+
+        startApp();
+    } catch (err) {
+        console.error(err);
+        showNotification(
+            "تعذّر إنشاء الحساب. تأكدي أن المتصفح يدعم IndexedDB."
         );
     } finally {
         showLoader(false);
@@ -472,12 +569,11 @@ async function refreshEventsListUI() {
         .join("");
 }
 
-async function openEvents(college) {
+function openEvents(college) {
     currentCollegeForEvents = college;
-    document.getElementById("college-name-display").innerText =
-        "فعاليات كلية " + college;
+    const titleEl = document.getElementById("college-name-display");
+    if (titleEl) titleEl.textContent = "فعاليات كلية " + college;
     goToPage("events-page");
-    await refreshEventsListUI();
 }
 
 async function registerForEvent(eventId) {
@@ -673,8 +769,7 @@ function renderAdminTable(users) {
     }
 }
 
-function loadAdmin() {
-    goToPage("admin-page");
+function bindAdminTableSync() {
     clearAdminSubscription();
 
     const table = document.getElementById("admin-table-body");
@@ -689,6 +784,11 @@ function loadAdmin() {
     window.addEventListener("athar-db-changed", adminSyncHandler);
     adminUnsub = setInterval(adminSyncHandler, 1000);
     adminSyncHandler();
+}
+
+function loadAdmin() {
+    goToPage("admin-page");
+    bindAdminTableSync();
 }
 
 async function addHours(uid, current) {
@@ -715,22 +815,134 @@ function closeAbout() {
     document.getElementById("about-modal").style.display = "none";
     document.getElementById("site-content").style.display = "block";
     document.querySelector(".site-nav").style.display = "flex";
-    goToPage("home-page");
+
+    if (!location.hash || location.hash === "#") {
+        routerSuppressHash = true;
+        location.hash = "#/home";
+        setTimeout(() => {
+            routerSuppressHash = false;
+            applyRouteFromHash();
+        }, 0);
+    } else {
+        applyRouteFromHash();
+    }
 }
 
-function goToPage(id) {
-    if (id !== "admin-page") {
+function getRouterHashForPage(pageId) {
+    if (pageId === "home-page") return "#/home";
+    if (pageId === "profile-page") return "#/profile";
+    if (pageId === "admin-page") return "#/admin";
+    if (pageId === "events-page") {
+        if (currentCollegeForEvents) {
+            return (
+                "#/events?college=" +
+                encodeURIComponent(currentCollegeForEvents)
+            );
+        }
+        return "#/events";
+    }
+    return "#/home";
+}
+
+function parseRouterHash() {
+    const raw = (location.hash || "#/home").replace(/^#/, "").trim();
+    if (!raw || raw === "/") return { route: "home", college: "" };
+
+    const [pathPart, queryPart] = raw.includes("?")
+        ? raw.split("?")
+        : [raw, ""];
+    const seg = pathPart.split("/").filter(Boolean);
+    const route = seg[0] || "home";
+    const college = new URLSearchParams(queryPart).get("college") || "";
+    return { route, college };
+}
+
+function syncRouterHash(pageId) {
+    const siteContent = document.getElementById("site-content");
+    if (!siteContent || siteContent.style.display === "none") return;
+
+    const next = getRouterHashForPage(pageId);
+    if (location.hash === next) return;
+
+    routerSuppressHash = true;
+    location.hash = next;
+    setTimeout(() => {
+        routerSuppressHash = false;
+    }, 0);
+}
+
+function applyPageView(pageId) {
+    if (pageId !== "admin-page") {
         clearAdminSubscription();
     }
     document
         .querySelectorAll(".page")
         .forEach((p) => p.classList.remove("active"));
-    document.getElementById(id).classList.add("active");
+    const pageEl = document.getElementById(pageId);
+    if (pageEl) pageEl.classList.add("active");
     window.scrollTo(0, 0);
 
-    if (id === "events-page" && currentCollegeForEvents) {
+    if (pageId === "events-page" && currentCollegeForEvents) {
         refreshEventsListUI().catch(console.error);
     }
+}
+
+function applyRouteFromHash() {
+    if (routerSuppressHash) return;
+
+    const siteContent = document.getElementById("site-content");
+    if (!siteContent || siteContent.style.display === "none") return;
+
+    const { route, college } = parseRouterHash();
+
+    if (route === "home") {
+        currentCollegeForEvents = "";
+        applyPageView("home-page");
+    } else if (route === "profile") {
+        currentCollegeForEvents = "";
+        applyPageView("profile-page");
+    } else if (route === "admin") {
+        if (!userData || userData.role !== "admin") {
+            showNotification("هذه الصفحة خاصة بالمسؤولة.");
+            routerSuppressHash = true;
+            location.hash = "#/home";
+            setTimeout(() => {
+                routerSuppressHash = false;
+            }, 0);
+            currentCollegeForEvents = "";
+            applyPageView("home-page");
+            return;
+        }
+        applyPageView("admin-page");
+        bindAdminTableSync();
+    } else if (route === "events") {
+        if (!college) {
+            routerSuppressHash = true;
+            location.hash = "#/home";
+            setTimeout(() => {
+                routerSuppressHash = false;
+            }, 0);
+            currentCollegeForEvents = "";
+            applyPageView("home-page");
+            return;
+        }
+        currentCollegeForEvents = college;
+        const titleEl = document.getElementById("college-name-display");
+        if (titleEl) titleEl.textContent = "فعاليات كلية " + college;
+        applyPageView("events-page");
+        refreshEventsListUI().catch(console.error);
+    } else {
+        currentCollegeForEvents = "";
+        applyPageView("home-page");
+    }
+}
+
+function goToPage(id) {
+    if (id !== "events-page") {
+        currentCollegeForEvents = "";
+    }
+    applyPageView(id);
+    syncRouterHash(id);
 }
 
 function closeNavMenu() {
@@ -765,7 +977,11 @@ window.addEventListener("athar-db-changed", () => {
     }
 });
 
+window.addEventListener("hashchange", applyRouteFromHash);
+
 document.addEventListener("DOMContentLoaded", () => {
+    setAuthMode("login");
+
     const toggle = document.getElementById("nav-menu-toggle");
     if (toggle) {
         toggle.addEventListener("click", (e) => {

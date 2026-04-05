@@ -349,8 +349,8 @@
 
       /* تنسيق اللوجو الجديد (بدون إطار) */
       .login-logo {
-          width: 140px;
-          height: auto;
+          width: 100px;
+          height: 100px;
           margin: 0 auto 10px;
           display: flex;
           align-items: center;
@@ -366,10 +366,10 @@
       /* تنسيق العنوان المطلوب */
       #login-header {
           color: var(--primary);
-          font-size: 2rem;
+          font-size: 1.5rem;
           font-weight: 700;
           margin-top: 0;
-          margin-bottom: 30px;
+          /* margin-bottom: 30px; */
           display: flex;
           align-items: center;
           justify-content: center;
@@ -380,6 +380,39 @@
           font-weight: 300;
           color: #ccc;
           margin: 0 5px;
+      }
+
+      .auth-tabs {
+          display: flex;
+          gap: 0;
+          margin-bottom: 22px;
+          border-radius: 14px;
+          overflow: hidden;
+          border: 1.5px solid rgba(0, 96, 100, 0.15);
+          background: #fafafa;
+      }
+
+      .auth-tab {
+          flex: 1;
+          padding: 12px 14px;
+          border: none;
+          background: transparent;
+          font-family: "Tajawal", sans-serif;
+          font-size: 0.8rem;
+          font-weight: 700;
+          cursor: pointer;
+          color: #666;
+          transition: background 0.25s ease, color 0.25s ease;
+      }
+
+      .auth-tab--active {
+          background: var(--primary);
+          color: white;
+      }
+
+      .auth-tab:not(.auth-tab--active):hover {
+          background: rgba(0, 96, 100, 0.08);
+          color: var(--primary);
       }
 
       /* الحقول والأزرار */
@@ -417,6 +450,10 @@
           display: grid;
           grid-template-columns: repeat(3, minmax(0, 1fr));
           gap: 18px;
+      }
+
+      #reg-extra-fields[hidden] {
+          display: none !important;
       }
 
       @media (max-width: 992px) {

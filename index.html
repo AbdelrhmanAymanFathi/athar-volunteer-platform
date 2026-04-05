@@ -29,52 +29,85 @@
       <span id="notification-message"></span>
     </div>
 
-    <div id="login-wrapper">
+    <div id="login-wrapper" data-auth-mode="login">
       <div class="login-box">
         <div class="login-logo">
           <img src="./imgs/logo.png" alt="Athar Logo" />
         </div>
         <h2 id="login-header">أثــر <span class="separator">|</span> Athar</h2>
 
-        <form onsubmit="handleAuth(event)">
-          <div id="reg-extra-fields">
+        <div class="auth-tabs" role="tablist" aria-label="نوع الدخول">
+          <button
+            type="button"
+            role="tab"
+            id="tab-login"
+            class="auth-tab auth-tab--active"
+            aria-selected="true"
+            onclick="setAuthMode('login')"
+          >
+            تسجيل الدخول
+          </button>
+          <button
+            type="button"
+            role="tab"
+            id="tab-register"
+            class="auth-tab"
+            aria-selected="false"
+            onclick="setAuthMode('register')"
+          >
+            تسجيل جديد
+          </button>
+        </div>
+
+        <form id="auth-form" onsubmit="handleAuthSubmit(event)" novalidate>
+          <div id="reg-extra-fields" class="reg-extra-fields" hidden>
             <div class="input-group">
-              <label>الاسم الكامل</label
-              ><input
+              <label for="reg-fullname">الاسم الكامل</label>
+              <input
                 type="text"
                 id="reg-fullname"
                 placeholder="أدخلي اسمك الثلاثي"
-                required
+                autocomplete="name"
               />
             </div>
             <div class="input-group">
-              <label>رقم الجوال</label
-              ><input
+              <label for="reg-phone">رقم الجوال</label>
+              <input
                 type="tel"
                 id="reg-phone"
                 placeholder="05xxxxxxxx"
-                required
+                autocomplete="tel"
               />
             </div>
             <div class="input-group">
-              <label>تاريخ الميلاد</label
-              ><input type="date" id="reg-dob" required />
+              <label for="reg-dob">تاريخ الميلاد</label>
+              <input type="date" id="reg-dob" autocomplete="bday" />
             </div>
           </div>
           <div class="input-group">
-            <label>البريد الجامعي</label
-            ><input
+            <label for="reg-email">البريد الجامعي</label>
+            <input
               type="email"
               id="reg-email"
               placeholder="44****@pnu.edu.sa"
               required
+              autocomplete="username"
             />
           </div>
           <div class="input-group">
-            <label>كلمة المرور</label
-            ><input type="password" placeholder="********" required />
+            <label for="login-password">كلمة المرور</label>
+            <input
+              type="password"
+              id="login-password"
+              placeholder="********"
+              required
+              minlength="6"
+              autocomplete="current-password"
+            />
           </div>
-          <button type="submit" class="btn-login">دخول للمنصة</button>
+          <button type="submit" class="btn-login" id="auth-submit-btn">
+            تسجيل الدخول
+          </button>
         </form>
       </div>
     </div>
