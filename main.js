@@ -161,6 +161,35 @@ function normalizeUserRow(u) {
     return row;
 }
 
+/** هدف التخرج التطوعي (للمخطط الدائري) */
+const VOLUNTEER_GRADUATION_TARGET = 50;
+
+/**
+ * مجموع ساعات الفعاليات التي سجّلت الطالبة مشاركتها (حسب volunteerHours لكل فعالية).
+ */
+function sumVolunteerHoursFromEvents(userRow, events) {
+    const row = normalizeUserRow(userRow);
+    const ids = row.volunteerEventIds || [];
+    const map = new Map((events || []).map((e) => [e.id, e]));
+    let sum = 0;
+    for (const id of ids) {
+        const ev = map.get(id);
+        if (!ev) continue;
+        const vh = parseInt(ev.volunteerHours, 10);
+        sum += Number.isFinite(vh) && vh > 0 ? vh : 4;
+    }
+    return sum;
+}
+
+/**
+ * إجمالي الساعات المعروضة: من الفعاليات + الساعات التي تضيفها المسؤولة يدوياً (حقل hours).
+ */
+function totalVolunteerHoursForDisplay(userRow, events) {
+    const fromEvents = sumVolunteerHoursFromEvents(userRow, events);
+    const manual = parseInt(userRow.hours, 10) || 0;
+    return fromEvents + manual;
+}
+
 async function loadDb() {
     await ensureIdbInit();
     const db = await openIdb();
@@ -283,10 +312,12 @@ function subscribeCurrentUserHours(uid) {
             .then((db) => {
                 const u = db.users.find((x) => x.uid === uid);
                 if (!u) return;
-                const hrs = parseInt(u.hours, 10) || 0;
+                const hrs = totalVolunteerHoursForDisplay(u, db.events);
                 if (userData) {
                     userData.hours = hrs;
-                    userData.volunteerEventIds = [...(u.volunteerEventIds || [])];
+                    userData.volunteerEventIds = [
+                        ...normalizeUserRow(u).volunteerEventIds,
+                    ];
                 }
                 updateChart(hrs);
             })
@@ -517,20 +548,42 @@ function startApp() {
     document.getElementById("prof-phone").innerText = userData.phone;
     document.getElementById("prof-dob").innerText = userData.dob;
 
-    updateChart(userData.hours);
+    if (userData && userData.role !== "admin") {
+        void refreshVolunteerHoursUI();
+    } else {
+        updateChart(0);
+    }
     updateNavForRole();
+}
+
+async function refreshVolunteerHoursUI() {
+    if (!userData || userData.role === "admin") return;
+    try {
+        const db = await loadDb();
+        const u = db.users.find((x) => x.uid === userData.uid);
+        if (!u) return;
+        const hrs = totalVolunteerHoursForDisplay(u, db.events);
+        userData.hours = hrs;
+        userData.volunteerEventIds = [
+            ...normalizeUserRow(u).volunteerEventIds,
+        ];
+        updateChart(hrs);
+    } catch (err) {
+        console.error(err);
+    }
 }
 
 function updateChart(h) {
     const hrs = parseInt(h, 10) || 0;
-    const percent = Math.min((hrs / 50) * 100, 100);
+    const cap = VOLUNTEER_GRADUATION_TARGET;
+    const percent = Math.min((hrs / cap) * 100, 100);
     document.getElementById("chart-circle").style.background =
         `conic-gradient(var(--primary) ${percent}%, #eee 0%)`;
     document
         .getElementById("chart-circle")
         .querySelector("span").innerText = percent.toFixed(0) + "%";
     document.getElementById("hours-summary").innerText =
-        `أنجزتِ ${hrs} من 50 ساعة تطوعية`;
+        `أنجزتِ ${hrs} من ${cap} ساعة تطوعية`;
 }
 
 function escapeHtml(text) {
@@ -670,6 +723,7 @@ async function registerForEvent(eventId) {
         userData.volunteerEventIds = [...u.volunteerEventIds];
         showNotification("تم تسجيل الفعالية في سجلك التطوعي.");
         await refreshEventsListUI();
+        await refreshVolunteerHoursUI();
     } catch (err) {
         console.error(err);
         showNotification("تعذّر التسجيل في الفعالية.");
@@ -818,19 +872,25 @@ function goToLeaderHome() {
     showNotification("اختر الكلية، ثم أضيفي أو حذفي الفعاليات من صفحة الفعاليات.");
 }
 
-function renderAdminTable(users) {
+function renderAdminTable(users, events) {
     const table = document.getElementById("admin-table-body");
+    const evs = events || [];
     table.innerHTML = "";
     const rows = [];
     users.forEach((u) => {
         if (u.role === "admin") return;
-        const hrs = parseInt(u.hours, 10) || 0;
+        const displayHrs = totalVolunteerHoursForDisplay(u, evs);
+        const manualHrs = parseInt(u.hours, 10) || 0;
         const uid = escapeHtml(u.uid);
         const name = escapeHtml(u.name);
         rows.push(`<tr>
                     <td>${name}</td>
-                    <td><b>${hrs}</b> ساعة</td>
-                    <td><button type="button" onclick="addHours('${uid}', ${hrs})" style="background:#2e7d32; color:white; border:none; padding:8px 15px; border-radius:8px; cursor:pointer; font-weight:bold;">+5 ساعات</button></td>
+                    <td><b>${displayHrs}</b> ساعة${
+                        manualHrs > 0
+                            ? ` <span style="color:#666;font-size:0.85em">(يدوي: ${manualHrs})</span>`
+                            : ""
+                    }</td>
+                    <td><button type="button" onclick="addHours('${uid}', ${manualHrs})" style="background:#2e7d32; color:white; border:none; padding:8px 15px; border-radius:8px; cursor:pointer; font-weight:bold;">+5 ساعات</button></td>
                 </tr>`);
     });
     if (!rows.length) {
@@ -850,7 +910,7 @@ function bindAdminTableSync() {
 
     adminSyncHandler = () => {
         loadDb()
-            .then((db) => renderAdminTable(db.users))
+            .then((db) => renderAdminTable(db.users, db.events))
             .catch((err) => console.error(err));
     };
     window.addEventListener("athar-db-changed", adminSyncHandler);
