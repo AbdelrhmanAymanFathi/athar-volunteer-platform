@@ -12,6 +12,9 @@ const LEGACY_LS_KEY = "athar_local_v1";
 const LEADER_EMAIL = "leader@pnu.edu.sa";
 const ADMIN_EMAIL = "admin@pnu.edu.sa";
 
+const WHATSAPP_GROUP_URL =
+    "https://chat.whatsapp.com/IEIqX7xdIGB0siKRT8u9x";
+
 let idbConnection = null;
 let idbInitPromise = null;
 
@@ -202,6 +205,7 @@ function findUserByEmail(db, email) {
 
 function toPublicUser(u) {
     const row = normalizeUserRow(u);
+    const ids = Array.isArray(row.volunteerEventIds) ? row.volunteerEventIds : [];
     return {
         uid: row.uid,
         name: row.name,
@@ -210,7 +214,7 @@ function toPublicUser(u) {
         dob: row.dob,
         hours: parseInt(row.hours, 10) || 0,
         role: row.role,
-        volunteerEventIds: [...row.volunteerEventIds],
+        volunteerEventIds: [...ids],
     };
 }
 
@@ -501,6 +505,24 @@ function escapeAttr(s) {
     return String(s).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 }
 
+function formatEventDateDisplay(iso) {
+    if (!iso) return "";
+    try {
+        const d = new Date(
+            String(iso).includes("T") ? iso : `${iso}T12:00:00`
+        );
+        if (Number.isNaN(d.getTime())) return String(iso);
+        return d.toLocaleDateString("ar-SA", {
+            weekday: "long",
+            year: "numeric",
+            month: "long",
+            day: "numeric",
+        });
+    } catch {
+        return String(iso);
+    }
+}
+
 async function refreshEventsListUI() {
     const list = document.getElementById("events-list");
     const fab = document.getElementById("fab-add-event");
@@ -534,26 +556,26 @@ async function refreshEventsListUI() {
         .map((ev) => {
             const title = escapeHtml(ev.title);
             const loc = escapeHtml(ev.location || "");
-            const dateStr = escapeHtml(ev.date || "");
+            const dateStr = escapeHtml(formatEventDateDisplay(ev.date));
             const timeStr = escapeHtml(ev.time || "");
-            const regBadge = registered.has(ev.id)
-                ? '<span class="hours-tag event-registered-badge">مسجّلة في سجلك</span>'
+            const vh = Math.max(1, parseInt(ev.volunteerHours, 10) || 4);
+            const isReg = registered.has(ev.id);
+
+            const regNote = isReg
+                ? '<span class="hours-tag hours-tag--status">مسجّلة في سجلك</span>'
                 : canRegister
-                  ? '<span class="event-tap-hint">اضغطي لتسجيل المشاركة</span>'
+                  ? '<span class="event-tap-hint">اضغطي على البطاقة للتسجيل</span>'
                   : "";
+
+            const canRegClass =
+                canRegister && !isReg ? "event-card--can-register" : "";
+
             const delBtn = isLeader
-                ? `<button type="button" class="btn-delete-event" onclick="event.stopPropagation(); deleteCollegeEvent('${escapeAttr(ev.id)}')" aria-label="حذف الفعالية"><i class="fas fa-trash-alt"></i></button>`
+                ? `<button type="button" class="btn-delete-event" data-delete-id="${escapeHtml(ev.id)}" aria-label="حذف الفعالية"><i class="fas fa-trash-alt"></i></button>`
                 : "";
 
-            const clickable =
-                canRegister && !registered.has(ev.id)
-                    ? `event-card--clickable" role="button" tabindex="0" onclick="registerForEvent('${escapeAttr(ev.id)}')`
-                    : `event-card--static"`;
-
-            const regClass = registered.has(ev.id) ? " event-card--registered" : "";
-
             return `
-            <div class="event-card${regClass} ${clickable}>
+            <div class="event-card${isReg ? " event-card--registered" : ""} ${canRegClass}" data-event-id="${escapeHtml(ev.id)}">
                 <div class="event-details">
                     <h4>${title}</h4>
                     <p><i class="far fa-calendar-alt"></i> <b>التاريخ:</b> ${dateStr}</p>
@@ -561,7 +583,11 @@ async function refreshEventsListUI() {
                     <p><i class="fas fa-map-marker-alt"></i> <b>المكان:</b> ${loc}</p>
                 </div>
                 <div class="event-card-actions">
-                    ${regBadge}
+                    <span class="hours-tag">+${vh} ساعات مكتسبة</span>
+                    ${regNote}
+                    <a class="btn-whatsapp" href="${WHATSAPP_GROUP_URL}" target="_blank" rel="noopener noreferrer">
+                        <i class="fab fa-whatsapp"></i> انضمام للمجموعة
+                    </a>
                     ${delBtn}
                 </div>
             </div>`;
@@ -583,7 +609,10 @@ async function registerForEvent(eventId) {
         }
         return;
     }
-    if (userData.volunteerEventIds.includes(eventId)) {
+    const curIds = Array.isArray(userData.volunteerEventIds)
+        ? userData.volunteerEventIds
+        : [];
+    if (curIds.includes(eventId)) {
         showNotification("هذه الفعالية مسجّلة مسبقاً في سجلك.");
         return;
     }
@@ -656,6 +685,7 @@ async function submitNewEvent(e) {
             location,
             date,
             time,
+            volunteerHours: 4,
         };
         db.events.push(ev);
         await saveEvents(db.events);
@@ -689,7 +719,7 @@ async function deleteCollegeEvent(eventId) {
         }
         await saveDb(db);
 
-        if (userData) {
+        if (userData && Array.isArray(userData.volunteerEventIds)) {
             userData.volunteerEventIds = userData.volunteerEventIds.filter(
                 (id) => id !== eventId
             );
@@ -716,6 +746,9 @@ async function openVolunteerLogModal() {
     const db = await loadDb();
     const u = db.users.find((x) => x.uid === userData.uid);
     const ids = u ? normalizeUserRow(u).volunteerEventIds : [];
+    if (u) {
+        userData.volunteerEventIds = [...ids];
+    }
     const eventMap = new Map(db.events.map((ev) => [ev.id, ev]));
 
     if (!ids.length) {
@@ -979,8 +1012,34 @@ window.addEventListener("athar-db-changed", () => {
 
 window.addEventListener("hashchange", applyRouteFromHash);
 
+function handleEventsListClick(e) {
+    const delBtn = e.target.closest(".btn-delete-event");
+    if (delBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        const id = delBtn.getAttribute("data-delete-id");
+        if (id) deleteCollegeEvent(id);
+        return;
+    }
+    if (e.target.closest("a.btn-whatsapp")) {
+        return;
+    }
+    const card = e.target.closest(".event-card[data-event-id]");
+    if (!card || !card.classList.contains("event-card--can-register")) {
+        return;
+    }
+    e.preventDefault();
+    const id = card.getAttribute("data-event-id");
+    if (id) registerForEvent(id);
+}
+
 document.addEventListener("DOMContentLoaded", () => {
     setAuthMode("login");
+
+    const eventsListEl = document.getElementById("events-list");
+    if (eventsListEl) {
+        eventsListEl.addEventListener("click", handleEventsListClick);
+    }
 
     const toggle = document.getElementById("nav-menu-toggle");
     if (toggle) {
