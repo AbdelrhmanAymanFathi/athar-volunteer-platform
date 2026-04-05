@@ -5,7 +5,7 @@
  */
 
 const IDB_NAME = "athar_db";
-const IDB_VERSION = 2;
+const IDB_VERSION = 3;
 const USERS_STORE = "users";
 const EVENTS_STORE = "events";
 const LEGACY_LS_KEY = "athar_local_v1";
