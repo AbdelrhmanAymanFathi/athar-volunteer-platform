@@ -3,7 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- استبدل أو أضف الـ meta tags دي -->
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">   <!-- احتفظ بالقديم مؤقتًا -->
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="theme-color" content="#006064" />
+    <meta name="description" content="منصة أثر — التطوع الجامعي للطالبات في جامعة الأميرة نورة" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>مشروع أثر | التطوع الجامعي</title>
+    <link rel="manifest" href="./manifest.json" />
+    <link rel="apple-touch-icon" href="./imgs/logo.png" />
     <link
       href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700&display=swap"
       rel="stylesheet"
@@ -12,27 +22,28 @@
       rel="stylesheet"
       href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
     />
-    <link rel="stylesheet" href="./style.css">
+    <link rel="stylesheet" href="./style.css" />
   </head>
 
   <body>
-    <div id="loader">
+    <div id="loader" role="status" aria-live="polite" aria-busy="true">
       <i
         class="fas fa-circle-notch fa-spin fa-3x"
         style="color: var(--primary)"
+        aria-hidden="true"
       ></i>
       <p style="margin-top: 15px; font-weight: bold">جاري معالجة البيانات...</p>
     </div>
 
-    <div id="notification-toast">
-      <i class="fas fa-exclamation-circle"></i>
+    <div id="notification-toast" role="status" aria-live="polite">
+      <i class="fas fa-exclamation-circle" aria-hidden="true"></i>
       <span id="notification-message"></span>
     </div>
 
     <div id="login-wrapper" data-auth-mode="login">
       <div class="login-box">
         <div class="login-logo">
-          <img src="./imgs/logo.png" alt="Athar Logo" />
+          <img src="./imgs/logo.png" alt="شعار منصة أثر" width="100" height="100" />
         </div>
         <h2 id="login-header">أثــر <span class="separator">|</span> Athar</h2>
 
@@ -68,7 +79,9 @@
                 id="reg-fullname"
                 placeholder="أدخلي اسمك الثلاثي"
                 autocomplete="name"
+                aria-describedby="hint-fullname"
               />
+              <span id="hint-fullname" class="field-hint">ثلاثة أسماء على الأقل</span>
             </div>
             <div class="input-group">
               <label for="reg-phone">رقم الجوال</label>
@@ -76,8 +89,11 @@
                 type="tel"
                 id="reg-phone"
                 placeholder="05xxxxxxxx"
+                inputmode="numeric"
                 autocomplete="tel"
+                aria-describedby="hint-phone"
               />
+              <span id="hint-phone" class="field-hint">رقم سعودي يبدأ بـ 05</span>
             </div>
             <div class="input-group">
               <label for="reg-dob">تاريخ الميلاد</label>
@@ -89,10 +105,12 @@
             <input
               type="email"
               id="reg-email"
-              placeholder="44****@pnu.edu.sa"
+              placeholder="name@pnu.edu.sa"
               required
               autocomplete="username"
+              aria-describedby="hint-email"
             />
+            <span id="hint-email" class="field-hint">يجب أن ينتهي بـ @pnu.edu.sa</span>
           </div>
           <div class="input-group">
             <label for="login-password">كلمة المرور</label>
@@ -112,12 +130,12 @@
       </div>
     </div>
 
-    <div id="about-modal">
+    <div id="about-modal" role="dialog" aria-modal="true" aria-labelledby="about-title">
       <div class="about-content">
         <div class="logo-about-container">
-          <img src="./imgs/logo.png" alt="Athar Logo" />
+          <img src="./imgs/logo.png" alt="" width="120" height="120" />
         </div>
-        <h2 style="color: var(--primary)">مرحباً بكِ في "أثــر"</h2>
+        <h2 id="about-title" style="color: var(--primary)">مرحباً بكِ في "أثــر"</h2>
         <p
           style="
             line-height: 1.8;
@@ -143,8 +161,64 @@
 
     <div id="site-content" style="display: none">
       <nav class="site-nav" aria-label="التنقل الرئيسي">
-        <div class="nav-brand">
+        <div class="nav-brand" id="nav-brand-focus">
           أثــر <span class="nav-brand-sep">|</span> Athar
+        </div>
+        <div class="nav-actions">
+          <button
+            type="button"
+            class="nav-icon-btn"
+            id="btn-theme-toggle"
+            aria-pressed="false"
+            aria-label="تبديل الوضع الليلي"
+            title="الوضع الليلي"
+            onclick="toggleDarkMode()"
+          >
+            <i class="fas fa-moon" id="theme-toggle-icon" aria-hidden="true"></i>
+          </button>
+          <button
+            type="button"
+            class="nav-icon-btn is-hidden"
+            id="btn-install-pwa"
+            aria-label="تثبيت التطبيق"
+            title="تثبيت أثر"
+            onclick="triggerPwaInstall()"
+          >
+            <i class="fas fa-download" aria-hidden="true"></i>
+          </button>
+          <div class="nav-notif-wrap">
+            <button
+              type="button"
+              class="nav-icon-btn nav-notif-btn is-hidden"
+              id="btn-notifications"
+              aria-label="الإشعارات"
+              aria-expanded="false"
+              aria-controls="notifications-panel"
+              onclick="toggleNotificationsPanel(event)"
+            >
+              <i class="fas fa-bell" aria-hidden="true"></i>
+              <span class="nav-notif-badge" id="notif-badge" hidden>0</span>
+            </button>
+            <div
+              class="notifications-dropdown"
+              id="notifications-panel"
+              role="region"
+              aria-label="قائمة الإشعارات"
+              hidden
+            >
+              <div class="notifications-dropdown__head">
+                <span>الإشعارات</span>
+                <button
+                  type="button"
+                  class="link-btn"
+                  onclick="markAllNotificationsRead()"
+                >
+                  تعيين الكل كمقروء
+                </button>
+              </div>
+              <ul class="notifications-list" id="notifications-list"></ul>
+            </div>
+          </div>
         </div>
         <button
           type="button"
@@ -166,33 +240,48 @@
         <div class="nav-links" id="nav-links" role="navigation">
           <span
             class="nav-link-item"
+            role="link"
+            tabindex="0"
             onclick="goToPage('home-page'); closeNavMenu();"
+            onkeydown="if(event.key==='Enter'){goToPage('home-page'); closeNavMenu();}"
             ><i class="fas fa-home" aria-hidden="true"></i> الرئيسية</span
           >
           <span
             class="nav-link-item"
             id="nav-profile"
+            role="link"
+            tabindex="0"
             onclick="goToPage('profile-page'); closeNavMenu();"
+            onkeydown="if(event.key==='Enter'){goToPage('profile-page'); closeNavMenu();}"
             ><i class="fas fa-user-graduate" aria-hidden="true"></i> ملفي
             الشخصي</span
           >
           <span
             class="nav-link-item nav-link-item--admin is-hidden"
             id="nav-admin"
+            role="link"
+            tabindex="0"
             onclick="loadAdmin(); closeNavMenu();"
+            onkeydown="if(event.key==='Enter'){loadAdmin(); closeNavMenu();}"
             ><i class="fas fa-user-shield" aria-hidden="true"></i> لوحة
             الإدارة</span
           >
           <span
             class="nav-link-item nav-link-item--leader is-hidden"
             id="nav-leader"
+            role="link"
+            tabindex="0"
             onclick="goToLeaderHome();"
+            onkeydown="if(event.key==='Enter'){goToLeaderHome();}"
             ><i class="fas fa-calendar-plus" aria-hidden="true"></i> تنظيم
             الفعاليات</span
           >
           <span
             class="nav-link-item nav-link-item--logout"
+            role="link"
+            tabindex="0"
             onclick="location.reload()"
+            onkeydown="if(event.key==='Enter'){location.reload()}"
             ><i class="fas fa-sign-out-alt" aria-hidden="true"></i> خروج</span
           >
         </div>
@@ -212,17 +301,45 @@
         <div class="container">
           <h2 class="section-title">الكليات المتاحة</h2>
           <div class="colleges-grid">
-            <div class="college-card" onclick="openEvents('علوم الحاسب')">
-              <span class="college-icon">💻</span><strong>كلية الحاسب</strong>
+            <div
+              class="college-card"
+              role="button"
+              tabindex="0"
+              onclick="openEvents('علوم الحاسب')"
+              onkeydown="if(event.key==='Enter')openEvents('علوم الحاسب')"
+            >
+              <span class="college-icon" aria-hidden="true">💻</span
+              ><strong>كلية الحاسب</strong>
             </div>
-            <div class="college-card" onclick="openEvents('التصاميم')">
-              <span class="college-icon">🎨</span><strong>كلية التصاميم</strong>
+            <div
+              class="college-card"
+              role="button"
+              tabindex="0"
+              onclick="openEvents('التصاميم')"
+              onkeydown="if(event.key==='Enter')openEvents('التصاميم')"
+            >
+              <span class="college-icon" aria-hidden="true">🎨</span
+              ><strong>كلية التصاميم</strong>
             </div>
-            <div class="college-card" onclick="openEvents('التمريض')">
-              <span class="college-icon">🏥</span><strong>كلية التمريض</strong>
+            <div
+              class="college-card"
+              role="button"
+              tabindex="0"
+              onclick="openEvents('التمريض')"
+              onkeydown="if(event.key==='Enter')openEvents('التمريض')"
+            >
+              <span class="college-icon" aria-hidden="true">🏥</span
+              ><strong>كلية التمريض</strong>
             </div>
-            <div class="college-card" onclick="openEvents('اللغات')">
-              <span class="college-icon">🌐</span><strong>كلية اللغات</strong>
+            <div
+              class="college-card"
+              role="button"
+              tabindex="0"
+              onclick="openEvents('اللغات')"
+              onkeydown="if(event.key==='Enter')openEvents('اللغات')"
+            >
+              <span class="college-icon" aria-hidden="true">🌐</span
+              ><strong>كلية اللغات</strong>
             </div>
           </div>
         </div>
@@ -233,20 +350,92 @@
           <button
             type="button"
             onclick="goToPage('home-page')"
-            style="
-              border: none;
-              background: none;
-              color: var(--primary);
-              font-weight: bold;
-              cursor: pointer;
-              margin-bottom: 25px;
-              font-size: 1.1rem;
-            "
+            class="back-link"
           >
-            <i class="fas fa-arrow-right"></i> العودة للكليات
+            <i class="fas fa-arrow-right" aria-hidden="true"></i> العودة للكليات
           </button>
           <h2 class="section-title" id="college-name-display">الفعاليات</h2>
-          <div id="events-list"></div>
+
+          <div class="events-toolbar" role="region" aria-label="بحث وتصفية الفعاليات">
+            <div class="events-toolbar__row">
+              <label class="sr-only" for="events-search">بحث باسم الفعالية</label>
+              <input
+                type="search"
+                id="events-search"
+                class="events-search-input"
+                placeholder="ابحثي باسم الفعالية..."
+                autocomplete="off"
+                oninput="onEventsFilterChange()"
+              />
+              <label class="sr-only" for="events-filter-date">تصفية بالتاريخ</label>
+              <input
+                type="date"
+                id="events-filter-date"
+                class="events-date-input"
+                aria-label="تصفية بالتاريخ"
+                onchange="onEventsFilterChange()"
+              />
+              <label class="sr-only" for="events-filter-college">الكلية</label>
+              <select
+                id="events-filter-college"
+                class="events-select"
+                aria-label="تصفية حسب الكلية"
+                onchange="onCollegeFilterChange()"
+              >
+                <option value="">كل الكليات</option>
+                <option value="علوم الحاسب">علوم الحاسب</option>
+                <option value="التصاميم">التصاميم</option>
+                <option value="التمريض">التمريض</option>
+                <option value="اللغات">اللغات</option>
+              </select>
+            </div>
+            <div class="events-toolbar__row events-toolbar__row--actions">
+              <div class="view-toggle" role="group" aria-label="طريقة العرض">
+                <button
+                  type="button"
+                  class="view-toggle__btn view-toggle__btn--active"
+                  id="btn-view-list"
+                  aria-pressed="true"
+                  onclick="setEventsViewMode('list')"
+                >
+                  <i class="fas fa-list" aria-hidden="true"></i> قائمة
+                </button>
+                <button
+                  type="button"
+                  class="view-toggle__btn"
+                  id="btn-view-calendar"
+                  aria-pressed="false"
+                  onclick="setEventsViewMode('calendar')"
+                >
+                  <i class="fas fa-calendar-alt" aria-hidden="true"></i> تقويم
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div id="leader-stats-panel" class="leader-stats-panel is-hidden" aria-live="polite">
+            <h3 class="leader-stats-panel__title">
+              <i class="fas fa-chart-line" aria-hidden="true"></i> إحصائيات التنظيم
+            </h3>
+            <div class="leader-stats-panel__grid" id="leader-stats-summary"></div>
+            <div class="leader-stats-table-wrap">
+              <table class="leader-stats-table" aria-label="تفاصيل الفعاليات">
+                <thead>
+                  <tr>
+                    <th>الفعالية</th>
+                    <th>الكلية</th>
+                    <th>المسجلات</th>
+                  </tr>
+                </thead>
+                <tbody id="leader-stats-table-body"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div id="events-list-container">
+            <div id="events-list"></div>
+            <div id="events-calendar" class="events-calendar is-hidden" aria-hidden="true"></div>
+          </div>
           <button
             type="button"
             id="fab-add-event"
@@ -260,85 +449,73 @@
       </div>
 
       <div id="profile-page" class="page">
-        <div class="container" style="margin-top: 30px">
+        <div class="container profile-page-inner" style="margin-top: 30px">
           <h2 class="section-title">ملفي الشخصي</h2>
-          <div style="display: flex; gap: 30px; flex-wrap: wrap">
+          <div class="profile-layout">
             <div class="p-box">
-              <div
-                style="
-                  width: 100px;
-                  height: 100px;
-                  background: #f0f4f4;
-                  border-radius: 50%;
-                  margin: 0 auto 20px;
-                  display: flex;
-                  align-items: center;
-                  justify-content: center;
-                  border: 2px solid var(--primary);
-                "
-              >
-                <i
-                  class="fas fa-user-graduate"
-                  style="font-size: 3.5rem; color: var(--primary)"
-                ></i>
+              <div class="profile-avatar-wrap">
+                <i class="fas fa-user-graduate profile-avatar-icon" aria-hidden="true"></i>
               </div>
               <h3 id="prof-name-title" style="color: var(--primary)">-</h3>
+              <div class="badge-display" id="badge-display" aria-live="polite">
+                <span class="badge-display__label">المستوى:</span>
+                <span class="badge-display__value" id="badge-level-name">—</span>
+              </div>
+              <p class="badge-display__desc" id="badge-level-desc"></p>
               <div class="user-info-list">
                 <div class="info-item">
-                  <i class="fas fa-user"></i> <b>الاسم:</b>
+                  <i class="fas fa-user" aria-hidden="true"></i> <b>الاسم:</b>
                   <span id="prof-name">-</span>
                 </div>
                 <div class="info-item">
-                  <i class="fas fa-envelope"></i> <b>الإيميل:</b>
+                  <i class="fas fa-envelope" aria-hidden="true"></i> <b>الإيميل:</b>
                   <span id="prof-email">-</span>
                 </div>
                 <div class="info-item">
-                  <i class="fas fa-phone"></i> <b>الجوال:</b>
+                  <i class="fas fa-phone" aria-hidden="true"></i> <b>الجوال:</b>
                   <span id="prof-phone">-</span>
                 </div>
                 <div class="info-item">
-                  <i class="fas fa-calendar-alt"></i> <b>الميلاد:</b>
+                  <i class="fas fa-calendar-alt" aria-hidden="true"></i> <b>الميلاد:</b>
                   <span id="prof-dob">-</span>
                 </div>
               </div>
             </div>
             <div class="p-box">
-              <h4 style="margin-bottom: 20px; color: #444">
-                إحصائيات الساعات المنجزة
-              </h4>
-              <div
-                style="
-                  display: flex;
-                  flex-direction: column;
-                  align-items: center;
-                  justify-content: center;
-                  margin: 20px 0;
-                "
-              >
+              <h4 class="profile-subtitle">إحصائيات الساعات المنجزة</h4>
+              <div class="chart-wrap">
                 <div id="chart-circle" class="chart-circle">
                   <span>0%</span>
                 </div>
-                <p
-                  id="hours-summary"
-                  style="
-                    margin-top: 25px;
-                    font-weight: bold;
-                    color: var(--primary);
-                    font-size: 1.1rem;
-                  "
-                >
+                <p id="hours-summary" class="hours-summary-text">
                   أنجزتِ 0 من 50 ساعة
                 </p>
               </div>
-              <button
-                type="button"
-                class="btn-login"
-                style="margin-top: 20px"
-                onclick="openVolunteerLogModal()"
-              >
-                <i class="fas fa-award"></i> عرض السجل التطوعي
-              </button>
+              <div class="profile-actions-row">
+                <button
+                  type="button"
+                  class="btn-login btn-login--secondary"
+                  onclick="openVolunteerLogModal()"
+                >
+                  <i class="fas fa-award" aria-hidden="true"></i> عرض السجل التطوعي
+                </button>
+                <button
+                  type="button"
+                  class="btn-login"
+                  id="btn-export-certificate"
+                  onclick="exportVolunteerCertificatePdf()"
+                >
+                  <i class="fas fa-file-pdf" aria-hidden="true"></i> تصدير شهادة PDF
+                </button>
+              </div>
             </div>
+          </div>
+
+          <div class="p-box p-box--full upcoming-section">
+            <h4 class="profile-subtitle">
+              <i class="fas fa-hourglass-half" aria-hidden="true"></i> فعالياتي القادمة
+            </h4>
+            <ul id="upcoming-events-list" class="upcoming-events-list"></ul>
           </div>
         </div>
       </div>
@@ -346,12 +523,12 @@
       <div id="admin-page" class="page">
         <div class="container">
           <h2 class="section-title">لوحة إدارة الساعات (خاص بالمسؤولة)</h2>
-          <table>
+          <table role="grid" aria-label="قائمة الطالبات والساعات">
             <thead>
               <tr>
-                <th>الطالبة</th>
-                <th>الساعات الحالية</th>
-                <th>إجراء</th>
+                <th scope="col">الطالبة</th>
+                <th scope="col">الساعات الحالية</th>
+                <th scope="col">إجراء</th>
               </tr>
             </thead>
             <tbody id="admin-table-body"></tbody>
@@ -396,6 +573,16 @@
             <strong id="add-event-college-label">—</strong>
           </p>
           <form class="add-event-form" onsubmit="submitNewEvent(event)">
+            <div class="input-group" id="add-event-college-wrap" hidden>
+              <label for="new-event-college-select">اختيار الكلية</label>
+              <select id="new-event-college-select" class="events-select">
+                <option value="">— اختر الكلية —</option>
+                <option value="علوم الحاسب">علوم الحاسب</option>
+                <option value="التصاميم">التصاميم</option>
+                <option value="التمريض">التمريض</option>
+                <option value="اللغات">اللغات</option>
+              </select>
+            </div>
             <div class="input-group">
               <label for="new-event-title">اسم الفعالية</label>
               <input
@@ -422,19 +609,76 @@
               <label for="new-event-time">الوقت</label>
               <input type="time" id="new-event-time" required />
             </div>
+            <div class="input-group">
+              <label for="new-event-image">صورة للفعالية (اختياري)</label>
+              <input
+                type="file"
+                id="new-event-image"
+                accept="image/jpeg,image/png,image/webp"
+                aria-describedby="hint-event-img"
+              />
+              <span id="hint-event-img" class="field-hint"
+                >صورة JPG أو PNG أو WebP — تُخزَّن محلياً في جهازك فقط</span
+              >
+            </div>
             <div class="modal-actions">
               <button type="button" class="btn-modal-secondary" onclick="closeAddEventModal()">
                 إلغاء
               </button>
-              <button type="submit" class="btn-login" style="margin-top: 0; width: auto; padding: 12px 28px">
+              <button type="submit" class="btn-login btn-login--inline">
                 حفظ الفعالية
               </button>
             </div>
           </form>
         </div>
       </div>
+
+      <div
+        id="confirm-modal"
+        class="modal-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="confirm-modal-title"
+        aria-hidden="true"
+      >
+        <div class="modal-panel modal-panel--confirm" onclick="event.stopPropagation()">
+          <div class="confirm-modal__icon" id="confirm-modal-icon" aria-hidden="true">
+            <i class="fas fa-question-circle"></i>
+          </div>
+          <h3 id="confirm-modal-title" class="modal-title">تأكيد</h3>
+          <p id="confirm-modal-text" class="confirm-modal__text"></p>
+          <div class="modal-actions confirm-modal__actions">
+            <button type="button" class="btn-modal-secondary" id="confirm-modal-cancel">
+              إلغاء
+            </button>
+            <button type="button" class="btn-login btn-login--danger" id="confirm-modal-ok">
+              تأكيد
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
 
+    <div id="certificate-print-area" class="certificate-print-area" aria-hidden="true">
+      <div class="certificate-inner">
+        <img src="./imgs/logo.png" class="certificate-logo" alt="" width="80" height="80" />
+        <h1 class="certificate-brand">أثر — Athar</h1>
+        <p class="certificate-sub">منصة التطوع الجامعي — جامعة الأميرة نورة</p>
+        <h2 class="certificate-title">شهادة ساعات تطوعية</h2>
+        <p class="certificate-body">
+          تشهد منصة <strong>أثر</strong> بأن الطالبة<br />
+          <span id="cert-student-name" class="certificate-name">—</span>
+        </p>
+        <p class="certificate-hours">
+          قد أنجزت <strong><span id="cert-hours">0</span> ساعة تطوعية</strong> وفق السجل المعتمد في المنصة.
+        </p>
+        <p class="certificate-date">تاريخ الإصدار: <span id="cert-date">—</span></p>
+        <p class="certificate-foot">هذا المستند صادر من بيانات الجهاز المحلي ولا يُغني عن التوثيق الرسمي من الجامعة عند الاقتضاء.</p>
+      </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" crossorigin="anonymous"></script>
     <script src="./main.js"></script>
   </body>
 </html>
