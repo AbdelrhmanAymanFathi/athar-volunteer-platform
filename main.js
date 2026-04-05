@@ -539,6 +539,9 @@ async function handleRegister() {
 }
 
 function startApp() {
+    // حفظ الجلسة في localStorage
+    localStorage.setItem("athar_user_session", JSON.stringify(userData));
+
     document.getElementById("login-wrapper").style.display = "none";
     document.getElementById("about-modal").style.display = "flex";
 
@@ -960,6 +963,37 @@ function closeAbout() {
     }
 }
 
+function logout() {
+    // تنظيف البيانات
+    userData = null;
+    clearHoursSubscription();
+    clearAdminSubscription();
+    localStorage.removeItem("athar_user_session");
+
+    // إعادة عرض الـ login
+    document.getElementById("login-wrapper").style.display = "flex";
+    document.getElementById("site-content").style.display = "none";
+    document.querySelector(".site-nav").style.display = "none";
+    document.getElementById("about-modal").style.display = "none";
+
+    // إعادة تعيين النماذج
+    setAuthMode("login");
+    document.getElementById("reg-email").value = "";
+    document.getElementById("login-password").value = "";
+    document.getElementById("reg-fullname").value = "";
+    document.getElementById("reg-phone").value = "";
+    document.getElementById("reg-dob").value = "";
+
+    // إعادة تعيين الـ hash
+    routerSuppressHash = true;
+    location.hash = "";
+    setTimeout(() => {
+        routerSuppressHash = false;
+    }, 0);
+
+    showNotification("تم تسجيل الخروج.");
+}
+
 function getRouterHashForPage(pageId) {
     if (pageId === "home-page") return "#/home";
     if (pageId === "profile-page") return "#/profile";
@@ -1133,6 +1167,38 @@ function handleEventsListClick(e) {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+    // استعادة الجلسة من localStorage
+    const sessionData = localStorage.getItem("athar_user_session");
+    if (sessionData) {
+        try {
+            const parsed = JSON.parse(sessionData);
+            if (parsed && parsed.uid && parsed.email) {
+                userData = parsed;
+                // إعادة تشغيل الاشتراكات إذا لزم الأمر
+                if (userData.role !== "admin") {
+                    subscribeCurrentUserHours(userData.uid);
+                }
+                // الانتقال مباشرة إلى التطبيق
+                document.getElementById("login-wrapper").style.display = "none";
+                document.getElementById("site-content").style.display = "block";
+                document.querySelector(".site-nav").style.display = "flex";
+                document.getElementById("about-modal").style.display = "none";
+                updateNavForRole();
+                if (userData.role !== "admin") {
+                    void refreshVolunteerHoursUI();
+                } else {
+                    updateChart(0);
+                }
+                // تطبيق الـ route من الـ hash
+                applyRouteFromHash();
+                return; // لا نستمر في إعداد الـ login
+            }
+        } catch (e) {
+            console.warn("فشل استعادة الجلسة:", e);
+            localStorage.removeItem("athar_user_session");
+        }
+    }
+
     setAuthMode("login");
 
     const eventsListEl = document.getElementById("events-list");
