@@ -151,6 +151,13 @@
             الإدارة</span
           >
           <span
+            class="nav-link-item nav-link-item--leader is-hidden"
+            id="nav-leader"
+            onclick="goToLeaderHome();"
+            ><i class="fas fa-calendar-plus" aria-hidden="true"></i> تنظيم
+            الفعاليات</span
+          >
+          <span
             class="nav-link-item nav-link-item--logout"
             onclick="location.reload()"
             ><i class="fas fa-sign-out-alt" aria-hidden="true"></i> خروج</span
@@ -189,8 +196,9 @@
       </div>
 
       <div id="events-page" class="page">
-        <div class="container" style="margin-top: 30px">
+        <div class="container events-page-inner" style="margin-top: 30px">
           <button
+            type="button"
             onclick="goToPage('home-page')"
             style="
               border: none;
@@ -206,6 +214,15 @@
           </button>
           <h2 class="section-title" id="college-name-display">الفعاليات</h2>
           <div id="events-list"></div>
+          <button
+            type="button"
+            id="fab-add-event"
+            class="fab-add-event is-hidden"
+            onclick="openAddEventModal()"
+            aria-label="إضافة فعالية"
+          >
+            <i class="fas fa-plus" aria-hidden="true"></i>
+          </button>
         </div>
       </div>
 
@@ -280,7 +297,12 @@
                   أنجزتِ 0 من 50 ساعة
                 </p>
               </div>
-              <button class="btn-login" style="margin-top: 20px">
+              <button
+                type="button"
+                class="btn-login"
+                style="margin-top: 20px"
+                onclick="openVolunteerLogModal()"
+              >
                 <i class="fas fa-award"></i> عرض السجل التطوعي
               </button>
             </div>
@@ -301,6 +323,81 @@
             </thead>
             <tbody id="admin-table-body"></tbody>
           </table>
+        </div>
+      </div>
+
+      <div
+        id="volunteer-log-modal"
+        class="modal-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="volunteer-log-title"
+        onclick="closeVolunteerLogModal()"
+      >
+        <div class="modal-panel" onclick="event.stopPropagation()">
+          <h3 id="volunteer-log-title" class="modal-title">سجلك التطوعي</h3>
+          <p class="modal-subtitle">الفعاليات التي سجّلتِ مشاركتك فيها</p>
+          <ul id="volunteer-log-list" class="volunteer-log-list"></ul>
+          <button
+            type="button"
+            class="btn-login modal-close-btn"
+            onclick="closeVolunteerLogModal()"
+          >
+            إغلاق
+          </button>
+        </div>
+      </div>
+
+      <div
+        id="add-event-modal"
+        class="modal-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="add-event-title"
+        onclick="closeAddEventModal()"
+      >
+        <div class="modal-panel modal-panel--wide" onclick="event.stopPropagation()">
+          <h3 id="add-event-title" class="modal-title">إضافة فعالية</h3>
+          <p class="modal-subtitle">
+            تُضاف الفعالية لكلية:
+            <strong id="add-event-college-label">—</strong>
+          </p>
+          <form class="add-event-form" onsubmit="submitNewEvent(event)">
+            <div class="input-group">
+              <label for="new-event-title">اسم الفعالية</label>
+              <input
+                type="text"
+                id="new-event-title"
+                placeholder="مثال: ورشة التطوع البيئي"
+                required
+              />
+            </div>
+            <div class="input-group">
+              <label for="new-event-location">المكان</label>
+              <input
+                type="text"
+                id="new-event-location"
+                placeholder="قاعة / مبنى / موقع"
+                required
+              />
+            </div>
+            <div class="input-group">
+              <label for="new-event-date">التاريخ</label>
+              <input type="date" id="new-event-date" required />
+            </div>
+            <div class="input-group">
+              <label for="new-event-time">الوقت</label>
+              <input type="time" id="new-event-time" required />
+            </div>
+            <div class="modal-actions">
+              <button type="button" class="btn-modal-secondary" onclick="closeAddEventModal()">
+                إلغاء
+              </button>
+              <button type="submit" class="btn-login" style="margin-top: 0; width: auto; padding: 12px 28px">
+                حفظ الفعالية
+              </button>
+            </div>
+          </form>
         </div>
       </div>
     </div>
