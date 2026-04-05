@@ -145,11 +145,57 @@ async function migrateLegacyLocalStorage(db) {
     }
 }
 
+async function ensureDefaultAccounts(db) {
+    const users = await idbGetAllUsers(db);
+    const adminExists = users.some(u => u.email === ADMIN_EMAIL);
+    const leaderExists = users.some(u => u.email === LEADER_EMAIL);
+
+    const updates = [];
+
+    if (!adminExists) {
+        const adminPwdHash = await getAdminLeaderPasswordHash();
+        const adminUser = {
+            uid: newUid(),
+            name: "المديرة",
+            email: ADMIN_EMAIL,
+            phone: "",
+            dob: "",
+            hours: 0,
+            role: "admin",
+            volunteerEventIds: [],
+            pwdHash: adminPwdHash,
+        };
+        updates.push(adminUser);
+    }
+
+    if (!leaderExists) {
+        const leaderPwdHash = await getAdminLeaderPasswordHash();
+        const leaderUser = {
+            uid: newUid(),
+            name: "القائدة",
+            email: LEADER_EMAIL,
+            phone: "",
+            dob: "",
+            hours: 0,
+            role: "leader",
+            volunteerEventIds: [],
+            pwdHash: leaderPwdHash,
+        };
+        updates.push(leaderUser);
+    }
+
+    if (updates.length > 0) {
+        const allUsers = [...users, ...updates];
+        await idbReplaceAllUsers(db, allUsers);
+    }
+}
+
 function ensureIdbInit() {
     if (!idbInitPromise) {
         idbInitPromise = (async () => {
             const db = await openIdb();
             await migrateLegacyLocalStorage(db);
+            await ensureDefaultAccounts(db);
         })();
     }
     return idbInitPromise;
@@ -487,12 +533,10 @@ async function handleRegister() {
     }
 
     if (role === "admin" || role === "leader") {
-        if (password !== ADMIN_LEADER_PASSWORD) {
-            showNotification(
-                "كلمة مرور حساب المسؤولة أو القائدة غير صحيحة. استخدمي كلمة المرور المعتمدة من المنصة."
-            );
-            return;
-        }
+        showNotification(
+            "حساب المسؤولة أو القائدة موجود أساساً. استخدمي «تسجيل الدخول»."
+        );
+        return;
     }
 
     showLoader(true);
