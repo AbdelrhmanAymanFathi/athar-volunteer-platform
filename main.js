@@ -12,6 +12,9 @@ const LEGACY_LS_KEY = "athar_local_v1";
 const LEADER_EMAIL = "leader@pnu.edu.sa";
 const ADMIN_EMAIL = "admin@pnu.edu.sa";
 
+/** كلمة مرور ثابتة لحسابي الإدارة والقائدة فقط */
+const ADMIN_LEADER_PASSWORD = "P@ssw0rd";
+
 const WHATSAPP_GROUP_URL =
     "https://chat.whatsapp.com/IEIqX7xdIGB0siKRT8u9x";
 
@@ -198,6 +201,19 @@ async function hashPassword(pw) {
         .join("");
 }
 
+let adminLeaderPwdHashCache = null;
+async function getAdminLeaderPasswordHash() {
+    if (!adminLeaderPwdHashCache) {
+        adminLeaderPwdHashCache = await hashPassword(ADMIN_LEADER_PASSWORD);
+    }
+    return adminLeaderPwdHashCache;
+}
+
+function isAdminOrLeaderEmail(email) {
+    const e = email.trim().toLowerCase();
+    return e === ADMIN_EMAIL.toLowerCase() || e === LEADER_EMAIL.toLowerCase();
+}
+
 function findUserByEmail(db, email) {
     const e = email.trim().toLowerCase();
     return db.users.find((u) => u.email.trim().toLowerCase() === e) || null;
@@ -373,7 +389,18 @@ async function handleLogin() {
             );
             return;
         }
-        if (existing.pwdHash !== pwdHash) {
+
+        if (isAdminOrLeaderEmail(email)) {
+            const expected = await getAdminLeaderPasswordHash();
+            if (pwdHash !== expected) {
+                showNotification("كلمة المرور غير صحيحة.");
+                return;
+            }
+            if (existing.pwdHash !== expected) {
+                existing.pwdHash = expected;
+                await saveDb(db);
+            }
+        } else if (existing.pwdHash !== pwdHash) {
             showNotification("كلمة المرور غير صحيحة.");
             return;
         }
@@ -428,10 +455,22 @@ async function handleRegister() {
         return;
     }
 
+    if (role === "admin" || role === "leader") {
+        if (password !== ADMIN_LEADER_PASSWORD) {
+            showNotification(
+                "كلمة مرور حساب المسؤولة أو القائدة غير صحيحة. استخدمي كلمة المرور المعتمدة من المنصة."
+            );
+            return;
+        }
+    }
+
     showLoader(true);
 
     try {
-        const pwdHash = await hashPassword(password);
+        const pwdHash =
+            role === "admin" || role === "leader"
+                ? await getAdminLeaderPasswordHash()
+                : await hashPassword(password);
         const db = await loadDb();
         const existing = findUserByEmail(db, email);
 
