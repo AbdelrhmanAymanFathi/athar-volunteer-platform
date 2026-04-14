@@ -928,6 +928,77 @@
           max-width: 480px;
       }
 
+      .modal-panel--success {
+          max-width: 360px;
+          text-align: center;
+          padding: 2rem 1.5rem 1.5rem;
+      }
+
+      .success-modal-content {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+      }
+
+      .success-modal-icon {
+          width: 68px;
+          height: 68px;
+          border-radius: 50%;
+          background: linear-gradient(180deg, #0d7a68 0%, var(--primary) 100%);
+          color: white;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 1.8rem;
+          box-shadow: 0 12px 24px rgba(0, 96, 100, 0.18);
+          margin-bottom: 18px;
+      }
+
+      .success-modal-title {
+          margin: 0 0 12px;
+          color: var(--primary);
+          font-size: 1.35rem;
+      }
+
+      .success-modal-text {
+          margin: 0 0 16px;
+          line-height: 1.9;
+          color: #5a6969;
+          text-align: center;
+          font-size: 0.96rem;
+      }
+
+      .success-modal-status {
+          width: 100%;
+          padding: 12px 14px;
+          border-radius: 12px;
+          background: #eef9f2;
+          color: #5b6b5b;
+          font-weight: 700;
+          margin-bottom: 14px;
+      }
+
+      .success-modal-actions {
+          width: 100%;
+          display: flex;
+          gap: 10px;
+      }
+
+      .success-modal-btn {
+          width: 100%;
+          margin-top: 0;
+          padding: 12px 10px;
+          font-size: 0.94rem;
+      }
+
+      .success-modal-btn--secondary {
+          background: #0f6a5b;
+      }
+
+      .success-modal-btn--secondary:hover {
+          background: #0c5c4f;
+      }
+
       .modal-title {
           margin: 0 0 0.35rem;
           color: var(--primary);
@@ -1435,6 +1506,29 @@
           font-weight: 600;
       }
 
+      .admin-storage-actions {
+          display: flex;
+          gap: 12px;
+          flex-wrap: wrap;
+          margin-bottom: 12px;
+      }
+
+      .admin-storage-btn {
+          width: auto;
+          margin-top: 0;
+          padding-inline: 20px;
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+      }
+
+      .admin-storage-status {
+          margin: 0;
+          color: #607171;
+          line-height: 1.8;
+          font-size: 0.92rem;
+      }
+
       .admin-event-card {
           background: white;
           padding: 20px;
@@ -1547,6 +1641,8 @@
       }
 
       @media (max-width: 700px) {
+          .success-modal-actions,
+          .admin-storage-actions,
           .admin-user-card__header,
           .admin-user-event-row,
           .admin-request-item,
@@ -1566,6 +1662,11 @@
           .btn-approve,
           .btn-reject {
               flex: 1;
+          }
+
+          .admin-storage-btn {
+              width: 100%;
+              justify-content: center;
           }
       }
 

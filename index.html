@@ -129,23 +129,24 @@
 
   <div id="success-modal" class="modal-overlay">
     <div class="modal-panel modal-panel--success" onclick="event.stopPropagation()">
-      <div class="about-content">
-        <div class="logo-about-container">
-          <img src="./imgs/logo.png" alt="Athar Logo" />
+      <div class="success-modal-content">
+        <div class="success-modal-icon" aria-hidden="true">
+          <i class="fas fa-check"></i>
         </div>
-        <h2 style="color: var(--primary)">تم تقديم طلب الانضمام بنجاح</h2>
-        <p style="
-              line-height: 1.8;
-              color: #555;
-              text-align: justify;
-              margin: 20px 0;
-            ">
+        <h2 class="success-modal-title">تم تقديم طلب الانضمام بنجاح</h2>
+        <p class="success-modal-text">
           تم إرسال طلب الانضمام إلى الفعالية بنجاح. حالة الطلب: <b>قيد المراجعة</b>.
           سيتم إشعاركِ عند الموافقة على الطلب وإضافة الساعات التطوعية تلقائياً.
         </p>
-        <button onclick="closeSuccessModal()" class="btn-login" style="width: auto; padding: 12px 40px">
-          موافق
-        </button>
+        <div class="success-modal-status">حالة الطلب: قيد المراجعة</div>
+        <div class="success-modal-actions">
+          <button type="button" class="btn-login success-modal-btn" onclick="goToVolunteerOpportunities()">
+            العودة لفرص التطوع
+          </button>
+          <button type="button" class="btn-login success-modal-btn success-modal-btn--secondary" onclick="goToProfileFromSuccessModal()">
+            الانتقال إلى الملف الشخصي
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -305,6 +306,29 @@
         <button type="button" class="btn-login" style="margin-top: 20px" onclick="openAddEventModal()">
           <i class="fas fa-plus"></i> إضافة فعالية جديدة
         </button>
+        </div>
+        <div class="admin-section">
+          <div class="admin-section-header">
+            <div>
+              <h3 class="admin-section-title">نسخة البيانات</h3>
+              <p class="admin-section-subtitle">يمكنك تنزيل ملف db.json أو اختيار ملف محلي ليتم تحديثه تلقائياً أثناء هذه الجلسة.</p>
+            </div>
+          </div>
+          <div class="admin-storage-actions">
+            <button type="button" class="btn-login admin-storage-btn" onclick="exportDbJson()">
+              <i class="fas fa-file-export"></i> تصدير db.json
+            </button>
+            <button type="button" class="btn-modal-secondary admin-storage-btn" onclick="chooseDbJsonAutoSaveFile()">
+              <i class="fas fa-file-code"></i> اختيار ملف db.json للتحديث التلقائي
+            </button>
+            <button type="button" class="btn-modal-secondary admin-storage-btn" onclick="saveDbJsonNow()">
+              <i class="fas fa-save"></i> حفظ الآن إلى الملف المختار
+            </button>
+            <button type="button" class="btn-modal-secondary admin-storage-btn" onclick="importDbJsonFile()">
+              <i class="fas fa-file-import"></i> استيراد من db.json
+            </button>
+          </div>
+          <p class="admin-storage-status" id="db-json-status">لم يتم اختيار ملف للتحديث التلقائي بعد.</p>
         </div>
       </div>
     </div>

@@ -94,6 +94,10 @@ let idbConnection = null;
 let idbInitPromise = null;
 let dbSyncChannel = null;
 let dbSyncReady = false;
+let dbJsonFileHandle = null;
+let dbJsonAutoSaveTimer = null;
+let dbJsonAutoSaveInFlight = false;
+let dbJsonAutoSaveQueued = false;
 
 const DB_SYNC_TAB_ID =
     (typeof crypto !== "undefined" && crypto.randomUUID
@@ -126,6 +130,221 @@ function showNotification(message, duration = 4000) {
 
 function showLoader(v) {
     document.getElementById("loader").style.display = v ? "flex" : "none";
+}
+
+function updateDbJsonStatus(message, isError = false) {
+    const statusEl = document.getElementById("db-json-status");
+    if (!statusEl) return;
+    statusEl.textContent = message;
+    statusEl.style.color = isError ? "#c0392b" : "#607171";
+}
+
+async function buildDbJsonSnapshot() {
+    const db = await loadDb();
+    return {
+        exportedAt: new Date().toISOString(),
+        users: db.users,
+        events: db.events,
+        requests: db.requests,
+        chats: db.chats,
+    };
+}
+
+function downloadTextFile(filename, text) {
+    const blob = new Blob([text], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+}
+
+async function exportDbJson() {
+    showLoader(true);
+    try {
+        const snapshot = await buildDbJsonSnapshot();
+        downloadTextFile("db.json", JSON.stringify(snapshot, null, 2));
+        showNotification("تم تصدير ملف db.json بنجاح.");
+    } catch (err) {
+        console.error(err);
+        showNotification("تعذّر تصدير ملف db.json.");
+    } finally {
+        showLoader(false);
+    }
+}
+
+async function ensureDbJsonFilePermission(fileHandle) {
+    if (!fileHandle) return false;
+    if (typeof fileHandle.queryPermission === "function") {
+        const current = await fileHandle.queryPermission({ mode: "readwrite" });
+        if (current === "granted") return true;
+    }
+    if (typeof fileHandle.requestPermission === "function") {
+        const requested = await fileHandle.requestPermission({ mode: "readwrite" });
+        return requested === "granted";
+    }
+    return false;
+}
+
+async function writeSnapshotToDbJsonFile() {
+    if (!dbJsonFileHandle) return;
+    if (dbJsonAutoSaveInFlight) {
+        dbJsonAutoSaveQueued = true;
+        return;
+    }
+
+    dbJsonAutoSaveInFlight = true;
+    try {
+        const hasPermission = await ensureDbJsonFilePermission(dbJsonFileHandle);
+        if (!hasPermission) {
+            updateDbJsonStatus("تم إلغاء إذن الكتابة على ملف db.json المحلي.", true);
+            return;
+        }
+
+        const snapshot = await buildDbJsonSnapshot();
+        const writable = await dbJsonFileHandle.createWritable();
+        await writable.write(JSON.stringify(snapshot, null, 2));
+        await writable.close();
+        updateDbJsonStatus(
+            `تم تحديث ملف db.json المحلي تلقائياً آخر مرة في ${new Date().toLocaleTimeString("ar-SA")}.`
+        );
+    } catch (err) {
+        console.error(err);
+        updateDbJsonStatus("تعذّر تحديث ملف db.json المحلي تلقائياً.", true);
+    } finally {
+        dbJsonAutoSaveInFlight = false;
+        if (dbJsonAutoSaveQueued) {
+            dbJsonAutoSaveQueued = false;
+            void writeSnapshotToDbJsonFile();
+        }
+    }
+}
+
+function queueDbJsonAutoSave() {
+    if (!dbJsonFileHandle) return;
+    if (dbJsonAutoSaveTimer) {
+        clearTimeout(dbJsonAutoSaveTimer);
+    }
+    dbJsonAutoSaveTimer = setTimeout(() => {
+        dbJsonAutoSaveTimer = null;
+        void writeSnapshotToDbJsonFile();
+    }, 200);
+}
+
+async function chooseDbJsonAutoSaveFile() {
+    if (typeof window.showSaveFilePicker !== "function") {
+        showNotification("هذه الميزة مدعومة في متصفحات حديثة مثل Chrome و Edge على سطح المكتب فقط.");
+        updateDbJsonStatus("المتصفح الحالي لا يدعم اختيار ملف db.json للتحديث التلقائي.", true);
+        return;
+    }
+
+    try {
+        const handle = await window.showSaveFilePicker({
+            suggestedName: "db.json",
+            types: [
+                {
+                    description: "JSON Files",
+                    accept: { "application/json": [".json"] },
+                },
+            ],
+        });
+        dbJsonFileHandle = handle;
+        updateDbJsonStatus("تم اختيار ملف db.json المحلي. سيتم تحديثه تلقائياً عند كل تغيير.");
+        await writeSnapshotToDbJsonFile();
+        showNotification("تم ربط ملف db.json المحلي للتحديث التلقائي.");
+    } catch (err) {
+        if (err && err.name === "AbortError") {
+            updateDbJsonStatus("لم يتم اختيار ملف db.json للتحديث التلقائي بعد.");
+            return;
+        }
+        console.error(err);
+        updateDbJsonStatus("تعذّر اختيار ملف db.json المحلي.", true);
+        showNotification("تعذّر اختيار ملف db.json المحلي.");
+    }
+}
+
+async function saveDbJsonNow() {
+    if (!dbJsonFileHandle) {
+        showNotification("اختاري ملف db.json أولاً للتحديث المحلي.");
+        updateDbJsonStatus("لم يتم اختيار ملف db.json للتحديث التلقائي بعد.", true);
+        return;
+    }
+
+    showLoader(true);
+    try {
+        await writeSnapshotToDbJsonFile();
+        showNotification("تم حفظ db.json في الملف المختار.");
+    } catch (err) {
+        console.error(err);
+        showNotification("تعذّر حفظ db.json في الملف المختار.");
+    } finally {
+        showLoader(false);
+    }
+}
+
+function normalizeImportedDbPayload(payload) {
+    const imported = payload && typeof payload === "object" ? payload : {};
+    return {
+        users: Array.isArray(imported.users)
+            ? imported.users.map(normalizeUserRow)
+            : [],
+        events: Array.isArray(imported.events) ? imported.events : [],
+        requests: Array.isArray(imported.requests) ? imported.requests : [],
+        chats: Array.isArray(imported.chats) ? imported.chats : [],
+    };
+}
+
+async function overwriteDbFromJsonSnapshot(snapshot) {
+    await ensureIdbInit();
+    const db = await openIdb();
+    await Promise.all([
+        idbReplaceAllUsers(db, snapshot.users),
+        idbReplaceAllEvents(db, snapshot.events),
+        idbReplaceAllRequests(db, snapshot.requests),
+        idbReplaceAllChats(db, snapshot.chats),
+    ]);
+}
+
+async function importDbJsonFile() {
+    if (typeof window.showOpenFilePicker !== "function") {
+        showNotification("هذه الميزة مدعومة في متصفحات حديثة مثل Chrome و Edge على سطح المكتب فقط.");
+        return;
+    }
+
+    try {
+        const [fileHandle] = await window.showOpenFilePicker({
+            multiple: false,
+            types: [
+                {
+                    description: "JSON Files",
+                    accept: { "application/json": [".json"] },
+                },
+            ],
+        });
+
+        if (!fileHandle) return;
+
+        showLoader(true);
+        const file = await fileHandle.getFile();
+        const text = await file.text();
+        const parsed = JSON.parse(text);
+        const snapshot = normalizeImportedDbPayload(parsed);
+        await overwriteDbFromJsonSnapshot(snapshot);
+        updateDbJsonStatus("تم استيراد db.json بنجاح وتحديث البيانات المحلية.");
+        showNotification("تم استيراد db.json بنجاح.");
+    } catch (err) {
+        if (err && err.name === "AbortError") {
+            return;
+        }
+        console.error(err);
+        showNotification("تعذّر استيراد db.json. تأكدي أن الملف بصيغة صحيحة.");
+        updateDbJsonStatus("تعذّر استيراد db.json من الملف المختار.", true);
+    } finally {
+        showLoader(false);
+    }
 }
 
 function dispatchDbChangedEvent() {
@@ -1619,6 +1838,20 @@ function closeSuccessModal() {
     if (modal) modal.classList.remove("is-open");
 }
 
+function goToVolunteerOpportunities() {
+    closeSuccessModal();
+    if (currentCollegeForEvents) {
+        goToPage("events-page");
+        return;
+    }
+    goToPage("home-page");
+}
+
+function goToProfileFromSuccessModal() {
+    closeSuccessModal();
+    goToPage("profile-page");
+}
+
 function closeVolunteerLogModal() {
     const modal = document.getElementById("volunteer-log-modal");
     if (modal) modal.classList.remove("is-open");
@@ -2113,6 +2346,8 @@ function toggleNavMenu() {
 }
 
 window.addEventListener("athar-db-changed", () => {
+    queueDbJsonAutoSave();
+
     const ep = document.getElementById("events-page");
     const adminPage = document.getElementById("admin-page");
     if (
