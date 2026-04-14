@@ -2345,6 +2345,14 @@ function toggleNavMenu() {
     document.body.classList.toggle("nav-menu-open-body", open);
 }
 
+function handleNavToggleClick(event) {
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+    toggleNavMenu();
+}
+
 window.addEventListener("athar-db-changed", () => {
     queueDbJsonAutoSave();
 
@@ -2454,13 +2462,6 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     });
 
-    const toggle = document.getElementById("nav-menu-toggle");
-    if (toggle) {
-        toggle.addEventListener("click", (e) => {
-            e.stopPropagation();
-            toggleNavMenu();
-        });
-    }
     document.addEventListener("keydown", (e) => {
         if (e.key === "Escape") {
             closeNavMenu();
