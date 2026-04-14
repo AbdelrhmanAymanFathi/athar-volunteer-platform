@@ -99,6 +99,29 @@
     </div>
   </div>
 
+  <div id="success-modal" class="modal-overlay">
+    <div class="modal-panel modal-panel--success" onclick="event.stopPropagation()">
+      <div class="about-content">
+        <div class="logo-about-container">
+          <img src="./imgs/logo.png" alt="Athar Logo" />
+        </div>
+        <h2 style="color: var(--primary)">تم تقديم طلب الانضمام بنجاح</h2>
+        <p style="
+              line-height: 1.8;
+              color: #555;
+              text-align: justify;
+              margin: 20px 0;
+            ">
+          تم إرسال طلب الانضمام إلى الفعالية بنجاح. حالة الطلب: <b>قيد المراجعة</b>.
+          سيتم إشعاركِ عند الموافقة على الطلب وإضافة الساعات التطوعية تلقائياً.
+        </p>
+        <button onclick="closeSuccessModal()" class="btn-login" style="width: auto; padding: 12px 40px">
+          موافق
+        </button>
+      </div>
+    </div>
+  </div>
+
   <div id="site-content" style="display: none">
     <nav class="site-nav" aria-label="التنقل الرئيسي">
       <div class="nav-brand">
@@ -119,9 +142,6 @@
         <span class="nav-link-item nav-link-item--admin is-hidden" id="nav-admin"
           onclick="loadAdmin(); closeNavMenu();"><i class="fas fa-user-shield" aria-hidden="true"></i> لوحة
           الإدارة</span>
-        <span class="nav-link-item nav-link-item--leader is-hidden" id="nav-leader" onclick="goToLeaderHome();"><i
-            class="fas fa-calendar-plus" aria-hidden="true"></i> تنظيم
-          الفعاليات</span>
         <span class="nav-link-item nav-link-item--logout" onclick="logout()"><i class="fas fa-sign-out-alt"
             aria-hidden="true"></i> خروج</span>
       </div>
@@ -170,7 +190,12 @@
             ">
           <i class="fas fa-arrow-right"></i> العودة للكليات
         </button>
-        <h2 class="section-title" id="college-name-display">الفعاليات</h2>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+          <h2 class="section-title" id="college-name-display">الفعاليات</h2>
+          <button type="button" class="btn-chat" onclick="openChat()">
+            <i class="fas fa-comments"></i> الشات الجماعي
+          </button>
+        </div>
         <div id="events-list"></div>
         <button type="button" id="fab-add-event" class="fab-add-event is-hidden" onclick="openAddEventModal()"
           aria-label="إضافة فعالية">
@@ -250,17 +275,11 @@
 
     <div id="admin-page" class="page">
       <div class="container">
-        <h2 class="section-title">لوحة إدارة الساعات (خاص بالمسؤولة)</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>الطالبة</th>
-              <th>الساعات الحالية</th>
-              <th>إجراء</th>
-            </tr>
-          </thead>
-          <tbody id="admin-table-body"></tbody>
-        </table>
+        <h2 class="section-title">لوحة إدارة الفعاليات والطلبات</h2>
+        <div id="admin-events-list"></div>
+        <button type="button" class="btn-login" style="margin-top: 20px" onclick="openAddEventModal()">
+          <i class="fas fa-plus"></i> إضافة فعالية جديدة
+        </button>
       </div>
     </div>
 
@@ -290,6 +309,10 @@
             <input type="text" id="new-event-title" placeholder="مثال: ورشة التطوع البيئي" required />
           </div>
           <div class="input-group">
+            <label for="new-event-description">وصف الفعالية</label>
+            <textarea id="new-event-description" placeholder="وصف تفصيلي للفعالية" rows="3" required></textarea>
+          </div>
+          <div class="input-group">
             <label for="new-event-location">المكان</label>
             <input type="text" id="new-event-location" placeholder="قاعة / مبنى / موقع" required />
           </div>
@@ -298,8 +321,20 @@
             <input type="date" id="new-event-date" required />
           </div>
           <div class="input-group">
-            <label for="new-event-time">الوقت</label>
-            <input type="time" id="new-event-time" required />
+            <label for="new-event-time-start">وقت البداية</label>
+            <input type="time" id="new-event-time-start" required />
+          </div>
+          <div class="input-group">
+            <label for="new-event-time-end">وقت النهاية</label>
+            <input type="time" id="new-event-time-end" required />
+          </div>
+          <div class="input-group">
+            <label for="new-event-max-participants">الحد الأقصى للمشاركين</label>
+            <input type="number" id="new-event-max-participants" placeholder="مثال: 50" min="1" required />
+          </div>
+          <div class="input-group">
+            <label for="new-event-hours">عدد الساعات المكتسبة</label>
+            <input type="number" id="new-event-hours" placeholder="مثال: 4" min="1" required />
           </div>
           <div class="modal-actions">
             <button type="button" class="btn-modal-secondary" onclick="closeAddEventModal()">
@@ -312,6 +347,23 @@
         </form>
       </div>
     </div>
+    <div id="chat-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="chat-title"
+      onclick="closeChatModal()">
+      <div class="modal-panel modal-panel--chat" onclick="event.stopPropagation()">
+        <h3 id="chat-title" class="modal-title">الشات الجماعي - <span id="chat-college-name"></span></h3>
+        <div id="chat-messages" class="chat-messages"></div>
+        <div class="chat-input-container">
+          <input type="text" id="chat-input" placeholder="اكتبي رسالتك هنا..." maxlength="500" />
+          <button type="button" onclick="sendChatMessage()" class="btn-send">
+            <i class="fas fa-paper-plane"></i>
+          </button>
+        </div>
+        <button type="button" class="btn-modal-secondary modal-close-btn" onclick="closeChatModal()">
+          إغلاق
+        </button>
+      </div>
+    </div>
+
   </div>
 
   <script src="./main.js"></script>
