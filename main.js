@@ -1,23 +1,92 @@
 /**
  * IndexedDB: users (uid) + events (id) + requests (id) + chats (id)
  * أدوار: admin | student
- * المسؤولة: admin@pnu.edu.sa
+ * حسابات الإدارة حسب الكليات محددة مسبقاً داخل COLLEGE_CATALOG
  */
 
 const IDB_NAME = "athar_db";
-const IDB_VERSION = 4;
+const IDB_VERSION = 6;
 const USERS_STORE = "users";
 const EVENTS_STORE = "events";
 const REQUESTS_STORE = "requests";
 const CHATS_STORE = "chats";
 const LEGACY_LS_KEY = "athar_local_v1";
-const ADMIN_EMAIL = "admin@pnu.edu.sa";
+const ADMIN_ACCOUNTS_SEED_KEY = "athar_college_admin_seed_version";
+const ADMIN_ACCOUNTS_SEED_VERSION = "v1";
+const STUDENT_EMAIL_DOMAIN = "pnu.edu.sa";
 
-/** كلمة مرور ثابتة لحساب المسؤولة فقط */
-const ADMIN_PASSWORD = "P@ssw0rd";
+const COLLEGE_CATALOG = [
+    {
+        key: "computer",
+        name: "الحاسب",
+        displayName: "كلية الحاسب",
+        icon: "💻",
+        adminEmail: "pnu31@pnu.edu.sa",
+        adminPassword: "P@ssw0rd31",
+    },
+    {
+        key: "languages",
+        name: "اللغات",
+        displayName: "كلية اللغات",
+        icon: "🌐",
+        adminEmail: "pnu51@pnu.edu.sa",
+        adminPassword: "P@ssw0rd51",
+    },
+    {
+        key: "nursing",
+        name: "التمريض",
+        displayName: "كلية التمريض",
+        icon: "🏥",
+        adminEmail: "pnu101@pnu.edu.sa",
+        adminPassword: "P@ssw0rd101",
+    },
+    {
+        key: "arts-design",
+        name: "التصاميم والفنون",
+        displayName: "كلية التصاميم والفنون",
+        icon: "🎨",
+        adminEmail: "pnu81@pnu.edu.sa",
+        adminPassword: "P@ssw0rd81",
+    },
+    {
+        key: "dentistry",
+        name: "طب الأسنان",
+        displayName: "كلية طب الأسنان",
+        icon: "🦷",
+        adminEmail: "pnu21@pnu.edu.sa",
+        adminPassword: "P@ssw0rd21",
+    },
+    {
+        key: "business",
+        name: "إدارة الأعمال",
+        displayName: "كلية إدارة الأعمال",
+        icon: "💼",
+        adminEmail: "pnu61@pnu.edu.sa",
+        adminPassword: "P@ssw0rd61",
+    },
+];
 
-const WHATSAPP_GROUP_URL =
-    "https://chat.whatsapp.com/IEIqX7xdIGB0siKRT8u9x";
+const COLLEGE_NAME_ALIASES = {
+    "الحاسب": "الحاسب",
+    "كلية الحاسب": "الحاسب",
+    "علوم الحاسب": "الحاسب",
+    "اللغات": "اللغات",
+    "كلية اللغات": "اللغات",
+    "التمريض": "التمريض",
+    "كلية التمريض": "التمريض",
+    "التصاميم": "التصاميم والفنون",
+    "كلية التصاميم": "التصاميم والفنون",
+    "التصاميم والفنون": "التصاميم والفنون",
+    "كلية التصاميم والفنون": "التصاميم والفنون",
+    "طب الأسنان": "طب الأسنان",
+    "كلية طب الأسنان": "طب الأسنان",
+    "إدارة الأعمال": "إدارة الأعمال",
+    "كلية إدارة الأعمال": "إدارة الأعمال",
+    "ادارة الاعمال": "إدارة الأعمال",
+    "كلية ادارة الاعمال": "إدارة الأعمال",
+    "إدارة الاعمال": "إدارة الأعمال",
+    "كلية إدارة الاعمال": "إدارة الأعمال",
+};
 
 let idbConnection = null;
 let idbInitPromise = null;
@@ -30,6 +99,7 @@ let adminSyncHandler = null;
 
 /** كلية الفعاليات المعروضة حالياً */
 let currentCollegeForEvents = "";
+let currentEventChatId = "";
 
 /** يمنع حلقة لا نهائية عند مزامنة location.hash برمجياً */
 let routerSuppressHash = false;
@@ -206,29 +276,69 @@ async function migrateLegacyLocalStorage(db) {
 
 async function ensureDefaultAccounts(db) {
     const users = await idbGetAllUsers(db);
-    const adminExists = users.some(u => u.email === ADMIN_EMAIL);
+    const adminEmails = new Set(
+        COLLEGE_CATALOG.map((college) => college.adminEmail)
+    );
+    const shouldResetAdminCredentials =
+        localStorage.getItem(ADMIN_ACCOUNTS_SEED_KEY) !==
+        ADMIN_ACCOUNTS_SEED_VERSION;
+
+    const nonLegacyUsers = users.filter((user) => {
+        const email = String(user.email || "").trim().toLowerCase();
+        return user.role !== "admin" || adminEmails.has(email);
+    });
 
     const updates = [];
+    let needsRewrite = false;
 
-    if (!adminExists) {
-        const adminPwdHash = await getAdminPasswordHash();
-        const adminUser = {
-            uid: newUid(),
-            name: "المديرة",
-            email: ADMIN_EMAIL,
-            phone: "",
-            dob: "",
-            hours: 0,
-            role: "admin",
-            volunteerEventIds: [],
-            pwdHash: adminPwdHash,
-        };
-        updates.push(adminUser);
+    for (const college of COLLEGE_CATALOG) {
+        const adminIndex = nonLegacyUsers.findIndex(
+            (u) => String(u.email || "").trim().toLowerCase() === college.adminEmail
+        );
+
+        if (adminIndex === -1) {
+            updates.push({
+                uid: newUid(),
+                name: `مسؤولة ${college.displayName}`,
+                email: college.adminEmail,
+                phone: "",
+                dob: "",
+                hours: 0,
+                role: "admin",
+                college: college.name,
+                volunteerEventIds: [],
+                pwdHash: await getAdminPasswordHash(college.adminEmail),
+            });
+            continue;
+        }
+
+        const existing = normalizeUserRow(nonLegacyUsers[adminIndex]);
+        const normalizedCollege = normalizeCollegeName(existing.college);
+        if (
+            !existing.pwdHash ||
+            normalizedCollege !== college.name ||
+            shouldResetAdminCredentials
+        ) {
+            nonLegacyUsers[adminIndex] = {
+                ...existing,
+                name: `مسؤولة ${college.displayName}`,
+                college: college.name,
+                pwdHash: await getAdminPasswordHash(college.adminEmail),
+            };
+            needsRewrite = true;
+        }
     }
 
-    if (updates.length > 0) {
-        const allUsers = [...users, ...updates];
+    if (updates.length > 0 || needsRewrite) {
+        const allUsers = [...nonLegacyUsers, ...updates];
         await idbReplaceAllUsers(db, allUsers);
+    }
+
+    if (shouldResetAdminCredentials) {
+        localStorage.setItem(
+            ADMIN_ACCOUNTS_SEED_KEY,
+            ADMIN_ACCOUNTS_SEED_VERSION
+        );
     }
 }
 
@@ -246,6 +356,13 @@ function ensureIdbInit() {
 function normalizeUserRow(u) {
     const row = { ...u };
     if (!Array.isArray(row.volunteerEventIds)) row.volunteerEventIds = [];
+    row.college = normalizeCollegeName(row.college);
+    if (row.role === "admin") {
+        const adminAccount = getAdminAccountByEmail(row.email);
+        if (adminAccount && !row.college) {
+            row.college = adminAccount.college;
+        }
+    }
     return row;
 }
 
@@ -270,12 +387,169 @@ function sumVolunteerHoursFromEvents(userRow, events) {
 }
 
 /**
- * إجمالي الساعات المعروضة: من الفعاليات + الساعات التي تضيفها المسؤولة يدوياً (حقل hours).
+ * إجمالي الساعات المعروضة: نعتمد القيمة الأعلى بين الساعات المخزنة
+ * والساعات المحسوبة من الفعاليات المعتمدة لتفادي التكرار في البيانات القديمة.
  */
 function totalVolunteerHoursForDisplay(userRow, events) {
     const fromEvents = sumVolunteerHoursFromEvents(userRow, events);
-    const manual = parseInt(userRow.hours, 10) || 0;
-    return fromEvents + manual;
+    const stored = parseInt(userRow.hours, 10) || 0;
+    return Math.max(fromEvents, stored);
+}
+
+function getCompletedRequestCountForUser(userId, requests) {
+    return (requests || []).filter(
+        (request) => request.userId === userId && request.status === "completed"
+    ).length;
+}
+
+function getVolunteerHoursForRequest(request, eventRecord) {
+    if (!request || !eventRecord || request.status !== "completed") return 0;
+    return Math.max(1, parseInt(eventRecord.volunteerHours, 10) || 4);
+}
+
+function renderAdminUsersSection(users, events, requests, adminCollege) {
+    const summaryEl = document.getElementById("admin-users-summary");
+    const listEl = document.getElementById("admin-users-list");
+    if (!summaryEl || !listEl) return;
+
+    const normalizedAdminCollege = normalizeCollegeName(adminCollege);
+    const scopedEvents = (events || []).filter(
+        (eventRecord) =>
+            normalizeCollegeName(eventRecord.college) === normalizedAdminCollege
+    );
+    const scopedEventMap = new Map(scopedEvents.map((eventRecord) => [eventRecord.id, eventRecord]));
+    const scopedRequests = (requests || []).filter((request) =>
+        scopedEventMap.has(request.eventId)
+    );
+    const studentMap = new Map(
+        (users || [])
+            .map(normalizeUserRow)
+            .filter((user) => user.role !== "admin")
+            .map((user) => [user.uid, user])
+    );
+    const students = Array.from(
+        scopedRequests.reduce((map, request) => {
+            const student = studentMap.get(request.userId);
+            const eventRecord = scopedEventMap.get(request.eventId);
+            if (!student || !eventRecord) return map;
+
+            if (!map.has(student.uid)) {
+                map.set(student.uid, {
+                    student,
+                    requests: [],
+                    completedHours: 0,
+                });
+            }
+
+            const row = map.get(student.uid);
+            const earnedHours = getVolunteerHoursForRequest(request, eventRecord);
+            row.requests.push({
+                request,
+                event: eventRecord,
+                earnedHours,
+            });
+            row.completedHours += earnedHours;
+            return map;
+        }, new Map()).values()
+    ).sort((left, right) => {
+            const hoursDiff = right.completedHours - left.completedHours;
+            if (hoursDiff !== 0) return hoursDiff;
+            return String(left.student.name || "").localeCompare(
+                String(right.student.name || ""),
+                "ar"
+            );
+        });
+
+    const totalStudents = students.length;
+    const totalHours = students.reduce(
+        (sum, row) => sum + row.completedHours,
+        0
+    );
+    const totalCompletedEvents = scopedRequests.filter(
+        (request) => request.status === "completed"
+    ).length;
+
+    summaryEl.innerHTML = `
+        <div class="admin-summary-card">
+            <strong>${totalStudents}</strong>
+            <span>عدد الطالبات في فعاليات ${escapeHtml(getCollegeDisplayName(normalizedAdminCollege))}</span>
+        </div>
+        <div class="admin-summary-card">
+            <strong>${totalHours}</strong>
+            <span>إجمالي الساعات المكتسبة في هذه الكلية</span>
+        </div>
+        <div class="admin-summary-card">
+            <strong>${totalCompletedEvents}</strong>
+            <span>إجمالي المشاركات المكتملة</span>
+        </div>
+    `;
+
+    if (!students.length) {
+        listEl.innerHTML =
+            '<div class="admin-empty-state">لا توجد طالبات مرتبطات بفعاليات هذه الكلية حالياً.</div>';
+        return;
+    }
+
+    listEl.innerHTML = students
+        .map((row) => {
+            const student = row.student;
+            const completedRequestsCount = getCompletedRequestCountForUser(
+                student.uid,
+                scopedRequests
+            );
+            const eventsBreakdownHtml = row.requests
+                .sort((left, right) => {
+                    const leftDate = new Date(left.event.date || 0).getTime();
+                    const rightDate = new Date(right.event.date || 0).getTime();
+                    return rightDate - leftDate;
+                })
+                .map(({ request, event, earnedHours }) => {
+                    const statusText =
+                        request.status === "completed" ? "مكتملة" : "قيد المراجعة";
+                    const statusClass =
+                        request.status === "completed"
+                            ? "admin-event-chip--completed"
+                            : "admin-event-chip--pending";
+                    return `
+                        <div class="admin-user-event-row">
+                            <div class="admin-user-event-row__main">
+                                <strong>${escapeHtml(event.title || "-")}</strong>
+                                <span>${escapeHtml(formatEventDateDisplay(event.date))}</span>
+                            </div>
+                            <div class="admin-user-event-row__meta">
+                                <span class="admin-event-chip ${statusClass}">${statusText}</span>
+                                <span class="admin-user-event-row__hours">${earnedHours} ساعة</span>
+                            </div>
+                        </div>
+                    `;
+                })
+                .join("");
+
+            return `
+                <article class="admin-user-card">
+                    <div class="admin-user-card__header">
+                        <div>
+                            <h4 class="admin-user-card__name">${escapeHtml(student.name || "-")}</h4>
+                            <div class="admin-user-card__college">${escapeHtml(getCollegeDisplayName(normalizedAdminCollege))}</div>
+                        </div>
+                        <div class="admin-user-card__hours">
+                            ${row.completedHours} ساعة
+                            <small>الساعات التطوعية</small>
+                        </div>
+                    </div>
+                    <div class="admin-user-meta">
+                        <div><strong>الإيميل:</strong> ${escapeHtml(student.email || "-")}</div>
+                        <div><strong>الجوال:</strong> ${escapeHtml(student.phone || "-")}</div>
+                        <div><strong>الفعاليات المكتملة:</strong> ${completedRequestsCount}</div>
+                    </div>
+                    <div class="admin-user-events-list">
+                        <div class="admin-user-events-list__title">تفصيل الفعاليات</div>
+                        ${eventsBreakdownHtml}
+                    </div>
+                </article>
+            `;
+        })
+        .join("");
 }
 
 async function loadDb() {
@@ -334,22 +608,109 @@ async function hashPassword(pw) {
         .join("");
 }
 
-let adminPwdHashCache = null;
-async function getAdminPasswordHash() {
-    if (!adminPwdHashCache) {
-        adminPwdHashCache = await hashPassword(ADMIN_PASSWORD);
+const adminPwdHashCache = new Map();
+async function getAdminPasswordHash(email) {
+    const adminAccount = getAdminAccountByEmail(email);
+    if (!adminAccount) {
+        throw new Error("Admin account not found");
     }
-    return adminPwdHashCache;
+    if (!adminPwdHashCache.has(adminAccount.email)) {
+        adminPwdHashCache.set(
+            adminAccount.email,
+            await hashPassword(adminAccount.password)
+        );
+    }
+    return adminPwdHashCache.get(adminAccount.email);
+}
+
+function normalizeCollegeName(college) {
+    const value = String(college || "").trim();
+    if (!value) return "";
+    return COLLEGE_NAME_ALIASES[value] || value;
+}
+
+function getCollegeConfig(college) {
+    const normalized = normalizeCollegeName(college);
+    return COLLEGE_CATALOG.find((item) => item.name === normalized) || null;
+}
+
+function getCollegeDisplayName(college) {
+    const item = getCollegeConfig(college);
+    return item ? item.displayName : `كلية ${normalizeCollegeName(college)}`;
+}
+
+function getAdminAccountByEmail(email) {
+    const normalized = normalizeEmailInput(email);
+    const college = COLLEGE_CATALOG.find(
+        (item) => item.adminEmail === normalized
+    );
+    if (!college) return null;
+    return {
+        email: college.adminEmail,
+        password: college.adminPassword,
+        college: college.name,
+        displayName: college.displayName,
+    };
+}
+
+function getUserCollege(user) {
+    return normalizeCollegeName(user?.college);
+}
+
+function canUserAccessEventChat(user, eventRecord, requestRecord) {
+    if (!user || !eventRecord) return false;
+    if (user.role === "admin") {
+        return canAdminAccessCollege(eventRecord.college);
+    }
+    return requestRecord?.status === "completed";
+}
+
+function canAdminAccessCollege(college) {
+    if (!userData || userData.role !== "admin") return true;
+    return getUserCollege(userData) === normalizeCollegeName(college);
+}
+
+function renderHomeColleges() {
+    const grid = document.getElementById("colleges-grid");
+    if (!grid) return;
+
+    const colleges = userData && userData.role === "admin"
+        ? COLLEGE_CATALOG.filter((college) => college.name === getUserCollege(userData))
+        : COLLEGE_CATALOG;
+
+    grid.innerHTML = colleges
+        .map((college) => `
+            <div class="college-card" onclick="openEvents('${escapeAttr(college.name)}')">
+              <span class="college-icon">${college.icon}</span><strong>${escapeHtml(college.displayName)}</strong>
+            </div>
+        `)
+        .join("");
 }
 
 function isAdminEmail(email) {
-    const e = email.trim().toLowerCase();
-    return e === ADMIN_EMAIL.toLowerCase();
+    const e = normalizeEmailInput(email);
+    return !!getAdminAccountByEmail(e);
 }
 
 function findUserByEmail(db, email) {
-    const e = email.trim().toLowerCase();
+    const e = normalizeEmailInput(email);
     return db.users.find((u) => u.email.trim().toLowerCase() === e) || null;
+}
+
+function getAuthEmailInput() {
+    const el = document.getElementById("reg-email");
+    return el ? el.value.trim() : "";
+}
+
+function normalizeEmailInput(email) {
+    const value = String(email || "").trim().toLowerCase();
+    if (!value) return "";
+    if (value.includes("@")) return value;
+    return `${value}@${STUDENT_EMAIL_DOMAIN}`;
+}
+
+function isValidStudentEmailLocalPart(value) {
+    return /^\d{9}$/.test(String(value || "").trim());
 }
 
 function toPublicUser(u) {
@@ -363,26 +724,28 @@ function toPublicUser(u) {
         dob: row.dob,
         hours: parseInt(row.hours, 10) || 0,
         role: row.role,
+        college: row.college,
         volunteerEventIds: [...ids],
     };
 }
 
-function buildUserPayload(uid, name, email, phone, dob, role) {
+function buildUserPayload(uid, name, email, phone, dob, role, college = "") {
     return {
         uid,
         name,
         email,
         phone,
-        dob,
+        dob: dob || "",
         hours: 0,
         role,
+        college: normalizeCollegeName(college),
         volunteerEventIds: [],
     };
 }
 
 function resolveRoleFromEmail(email) {
-    const e = email.trim().toLowerCase();
-    if (e === ADMIN_EMAIL.toLowerCase()) return "admin";
+    const e = normalizeEmailInput(email);
+    if (isAdminEmail(e)) return "admin";
     return "student";
 }
 
@@ -449,9 +812,72 @@ function getAuthPassword() {
     return el ? el.value : "";
 }
 
+function getForgotPasswordValues() {
+    const newPasswordEl = document.getElementById("forgot-password-new");
+    const confirmPasswordEl = document.getElementById("forgot-password-confirm");
+    return {
+        newPassword: newPasswordEl ? newPasswordEl.value : "",
+        confirmPassword: confirmPasswordEl ? confirmPasswordEl.value : "",
+    };
+}
+
 function getAuthMode() {
     const w = document.getElementById("login-wrapper");
     return w && w.dataset.authMode === "register" ? "register" : "login";
+}
+
+function syncAuthEmailField(mode) {
+    const emailInput = document.getElementById("reg-email");
+    if (!emailInput) return;
+
+    const isRegister = mode === "register";
+    emailInput.placeholder = isRegister
+        ? "أدخلي 9 أرقام"
+        : "أدخلي الرقم الجامعي";
+    emailInput.inputMode = isRegister ? "numeric" : "text";
+    emailInput.maxLength = isRegister ? 9 : 32;
+}
+
+function clearForgotPasswordForm() {
+    const newPasswordEl = document.getElementById("forgot-password-new");
+    const confirmPasswordEl = document.getElementById("forgot-password-confirm");
+    if (newPasswordEl) newPasswordEl.value = "";
+    if (confirmPasswordEl) confirmPasswordEl.value = "";
+}
+
+function toggleForgotPasswordPanel(forceOpen) {
+    const panel = document.getElementById("forgot-password-panel");
+    if (!panel || getAuthMode() !== "login") return;
+
+    const shouldOpen =
+        typeof forceOpen === "boolean" ? forceOpen : panel.hidden;
+    panel.hidden = !shouldOpen;
+
+    if (!shouldOpen) {
+        clearForgotPasswordForm();
+    }
+}
+
+function syncForgotPasswordVisibility(mode) {
+    const trigger = document.getElementById("forgot-password-trigger");
+    const panel = document.getElementById("forgot-password-panel");
+    const isRegister = mode === "register";
+
+    if (trigger) trigger.hidden = isRegister;
+    if (panel && isRegister) {
+        panel.hidden = true;
+        clearForgotPasswordForm();
+    }
+}
+
+function sanitizeStudentIdInput() {
+    const emailInput = document.getElementById("reg-email");
+    if (!emailInput || getAuthMode() !== "register") return;
+
+    const digitsOnly = emailInput.value.replace(/\D/g, "").slice(0, 9);
+    if (emailInput.value !== digitsOnly) {
+        emailInput.value = digitsOnly;
+    }
 }
 
 function setAuthMode(mode) {
@@ -465,6 +891,11 @@ function setAuthMode(mode) {
     const isRegister = mode === "register";
     wrap.dataset.authMode = isRegister ? "register" : "login";
     extra.hidden = !isRegister;
+    syncAuthEmailField(mode);
+    syncForgotPasswordVisibility(mode);
+    if (isRegister) {
+        sanitizeStudentIdInput();
+    }
 
     if (tabLogin) {
         tabLogin.classList.toggle("auth-tab--active", !isRegister);
@@ -484,6 +915,53 @@ function setAuthMode(mode) {
     }
 }
 
+async function handleForgotPasswordReset() {
+    if (getAuthMode() !== "login") return;
+
+    const emailInput = getAuthEmailInput();
+    const email = normalizeEmailInput(emailInput);
+    const { newPassword, confirmPassword } = getForgotPasswordValues();
+
+    if (!emailInput) {
+        showNotification("أدخلي الرقم الجامعي أولاً.");
+        return;
+    }
+    if (!isAdminEmail(email) && !isValidStudentEmailLocalPart(emailInput)) {
+        showNotification("أدخلي الرقم الجامعي الصحيح أولاً.");
+        return;
+    }
+    if (!newPassword || newPassword.length < 6) {
+        showNotification("كلمة المرور الجديدة مطلوبة ولا تقل عن 6 أحرف.");
+        return;
+    }
+    if (newPassword !== confirmPassword) {
+        showNotification("كلمتا المرور غير متطابقتين.");
+        return;
+    }
+
+    showLoader(true);
+
+    try {
+        const db = await loadDb();
+        const existing = findUserByEmail(db, email);
+        if (!existing) {
+            showNotification("لا يوجد حساب بهذا الرقم الجامعي.");
+            return;
+        }
+
+        existing.pwdHash = await hashPassword(newPassword);
+        await saveDb(db);
+        clearForgotPasswordForm();
+        toggleForgotPasswordPanel(false);
+        showNotification("تم تغيير كلمة المرور بنجاح. يمكنك تسجيل الدخول الآن.");
+    } catch (err) {
+        console.error(err);
+        showNotification("تعذّر تغيير كلمة المرور.");
+    } finally {
+        showLoader(false);
+    }
+}
+
 async function handleAuthSubmit(e) {
     e.preventDefault();
     if (getAuthMode() === "register") {
@@ -494,17 +972,19 @@ async function handleAuthSubmit(e) {
 }
 
 async function handleLogin() {
-    const email = document.getElementById("reg-email").value.trim();
+    const emailInput = getAuthEmailInput();
     const password = getAuthPassword();
 
-    if (!email) {
-        showNotification("أدخلي البريد الجامعي.");
+    if (!emailInput) {
+        showNotification("أدخلي الرقم الجامعي.");
         return;
     }
     if (!password || password.length < 6) {
         showNotification("كلمة المرور مطلوبة ولا تقل عن 6 أحرف.");
         return;
     }
+
+    const email = normalizeEmailInput(emailInput);
 
     showLoader(true);
 
@@ -515,22 +995,12 @@ async function handleLogin() {
 
         if (!existing) {
             showNotification(
-                "لا يوجد حساب بهذا البريد. أنشئي حساباً من «تسجيل جديد»."
+                "لا يوجد حساب بهذا الرقم الجامعي. أنشئي حساباً من «تسجيل جديد»."
             );
             return;
         }
 
-        if (isAdminEmail(email)) {
-            const expected = await getAdminPasswordHash();
-            if (pwdHash !== expected) {
-                showNotification("كلمة المرور غير صحيحة.");
-                return;
-            }
-            if (existing.pwdHash !== expected) {
-                existing.pwdHash = expected;
-                await saveDb(db);
-            }
-        } else if (existing.pwdHash !== pwdHash) {
+        if (existing.pwdHash !== pwdHash) {
             showNotification("كلمة المرور غير صحيحة.");
             return;
         }
@@ -562,14 +1032,18 @@ async function handleRegister() {
         return;
     }
 
-    const email = document.getElementById("reg-email").value.trim();
+    const emailInput = getAuthEmailInput();
     const password = getAuthPassword();
     const phone = document.getElementById("reg-phone").value.trim();
-    const dob = document.getElementById("reg-dob").value;
+    const email = normalizeEmailInput(emailInput);
     const role = resolveRoleFromEmail(email);
 
-    if (!email) {
-        showNotification("أدخلي البريد الجامعي.");
+    if (!emailInput) {
+        showNotification("أدخلي الرقم الجامعي.");
+        return;
+    }
+    if (!isValidStudentEmailLocalPart(emailInput)) {
+        showNotification("يجب إدخال الرقم الجامعي من 9 أرقام.");
         return;
     }
     if (!password || password.length < 6) {
@@ -580,14 +1054,10 @@ async function handleRegister() {
         showNotification("أدخلي رقم الجوال.");
         return;
     }
-    if (!dob) {
-        showNotification("أدخلي تاريخ الميلاد.");
-        return;
-    }
 
     if (role === "admin") {
         showNotification(
-            "حساب المسؤولة موجود أساساً. استخدمي «تسجيل الدخول»."
+            "حساب الإدارة موجود أساساً. استخدمي «تسجيل الدخول»."
         );
         return;
     }
@@ -595,23 +1065,20 @@ async function handleRegister() {
     showLoader(true);
 
     try {
-        const pwdHash =
-            role === "admin"
-                ? await getAdminPasswordHash()
-                : await hashPassword(password);
+        const pwdHash = await hashPassword(password);
         const db = await loadDb();
         const existing = findUserByEmail(db, email);
 
         if (existing) {
             showNotification(
-                "البريد مسجّل مسبقاً. استخدمي «تسجيل الدخول»."
+                "الرقم الجامعي مسجّل مسبقاً. استخدمي «تسجيل الدخول»."
             );
             return;
         }
 
         const uid = newUid();
         const row = {
-            ...buildUserPayload(uid, fullname, email, phone, dob, role),
+            ...buildUserPayload(uid, fullname, email, phone, "", role),
             pwdHash,
         };
         db.users.push(row);
@@ -646,7 +1113,7 @@ function startApp() {
     document.getElementById("prof-name").innerText = userData.name;
     document.getElementById("prof-email").innerText = userData.email;
     document.getElementById("prof-phone").innerText = userData.phone;
-    document.getElementById("prof-dob").innerText = userData.dob;
+    renderHomeColleges();
 
     if (userData && userData.role !== "admin") {
         void refreshVolunteerHoursUI();
@@ -721,21 +1188,24 @@ async function refreshEventsListUI() {
     if (!list) return;
 
     const { events, requests } = await loadDb();
+    const targetCollege = normalizeCollegeName(currentCollegeForEvents);
     const collegeEvents = events.filter(
-        (ev) => ev.college === currentCollegeForEvents
+        (ev) => normalizeCollegeName(ev.college) === targetCollege
     );
     const canRegister =
         userData &&
         userData.role !== "admin";
+    const canManageCollege =
+        userData && userData.role === "admin" && canAdminAccessCollege(targetCollege);
 
     if (fab) {
-        fab.classList.toggle("is-hidden", userData.role !== "admin");
+        fab.classList.toggle("is-hidden", !canManageCollege);
     }
 
     if (!collegeEvents.length) {
         list.innerHTML = `
             <p class="events-empty-hint">لا توجد فعاليات مضافة لهذه الكلية بعد.${
-                userData.role === "admin" ? " استخدمي زر «+» لإضافة فعالية." : ""
+                canManageCollege ? " استخدمي زر «+» لإضافة فعالية." : ""
             }</p>`;
         return;
     }
@@ -758,20 +1228,29 @@ async function refreshEventsListUI() {
             const isReg = registeredEventIds.has(ev.id);
             const request = userRequests.find(r => r.eventId === ev.id);
             const statusText = request ? (request.status === "completed" ? "مكتملة" : "قيد المراجعة") : "";
+                        const canOpenChat = canUserAccessEventChat(userData, ev, request);
 
-            const regNote = isReg
-                ? `<span class="hours-tag hours-tag--status">${statusText}</span>`
-                : canRegister && currentRequests < maxPart
-                  ? '<span class="event-tap-hint">اضغطي على البطاقة لإرسال طلب انضمام</span>'
-                  : maxPart > 0 && currentRequests >= maxPart
-                    ? '<span class="event-tap-hint" style="color: #dc3545;">الفعالية مكتملة العدد</span>'
-                    : "";
+                        const regNote = isReg
+                                ? `<span class="hours-tag hours-tag--status">${statusText}</span>`
+                                : canRegister && currentRequests < maxPart
+                                    ? '<span class="event-tap-hint">يمكنكِ الإرسال من الزر أو من البطاقة</span>'
+                                    : maxPart > 0 && currentRequests >= maxPart
+                                        ? '<span class="event-tap-hint" style="color: #dc3545;">الفعالية مكتملة العدد</span>'
+                                        : "";
 
             const canRegClass =
                 canRegister && !isReg && (maxPart === 0 || currentRequests < maxPart) ? "event-card--can-register" : "";
 
-            const delBtn = userData.role === "admin"
-                ? `<button type="button" class="btn-delete-event" data-delete-id="${escapeHtml(ev.id)}" aria-label="حذف الفعالية"><i class="fas fa-trash-alt"></i></button>`
+            const delBtn = canManageCollege
+                ? `<button type="button" class="btn-delete-event" data-delete-id="${escapeHtml(ev.id)}" aria-label="حذف الفعالية" onclick="event.stopPropagation(); deleteCollegeEvent('${escapeAttr(ev.id)}');"><i class="fas fa-trash-alt"></i></button>`
+                : "";
+
+            const chatBtn = canOpenChat
+                ? `<button type="button" class="btn-chat btn-chat--event" data-chat-event-id="${escapeHtml(ev.id)}" onclick="event.stopPropagation(); openChat('${escapeAttr(ev.id)}').catch(console.error);"><i class="fas fa-comments"></i> شات الفعالية</button>`
+                : `<button type="button" class="btn-chat btn-chat--event btn-chat--disabled" disabled>${request?.status === "pending" ? "متاح بعد اعتماد الانضمام" : "الشات للمشاركات فقط"}</button>`;
+
+            const joinBtn = canRegister && !isReg && (maxPart === 0 || currentRequests < maxPart)
+                ? `<button type="button" class="btn-join-event" data-join-event-id="${escapeHtml(ev.id)}"><i class="fas fa-paper-plane"></i> إرسال طلب الانضمام</button>`
                 : "";
 
             return `
@@ -787,9 +1266,8 @@ async function refreshEventsListUI() {
                 <div class="event-card-actions">
                     <span class="hours-tag">+${vh} ساعات مكتسبة</span>
                     ${regNote}
-                    <a class="btn-whatsapp" href="${WHATSAPP_GROUP_URL}" target="_blank" rel="noopener noreferrer">
-                        <i class="fab fa-whatsapp"></i> انضمام للمجموعة
-                    </a>
+                    ${joinBtn}
+                    ${chatBtn}
                     ${delBtn}
                 </div>
             </div>`;
@@ -798,9 +1276,14 @@ async function refreshEventsListUI() {
 }
 
 function openEvents(college) {
-    currentCollegeForEvents = college;
+    const normalizedCollege = normalizeCollegeName(college);
+    if (userData && userData.role === "admin" && !canAdminAccessCollege(normalizedCollege)) {
+        showNotification("هذا الحساب مخصص لإدارة كلية واحدة فقط.");
+        return;
+    }
+    currentCollegeForEvents = normalizedCollege;
     const titleEl = document.getElementById("college-name-display");
-    if (titleEl) titleEl.textContent = "فعاليات كلية " + college;
+    if (titleEl) titleEl.textContent = "فعاليات " + getCollegeDisplayName(normalizedCollege);
     goToPage("events-page");
 }
 
@@ -811,7 +1294,7 @@ async function sendJoinRequest(eventId) {
     }
     
     if (userData.role === "admin") {
-        showNotification("حساب المسؤولة لا يُرسل طلبات انضمام.");
+        showNotification("حساب الإدارة لا يُرسل طلبات انضمام.");
         return;
     }
 
@@ -862,7 +1345,12 @@ function openAddEventModal() {
     const m = document.getElementById("add-event-modal");
     if (!m) return;
     const lab = document.getElementById("add-event-college-label");
-    if (lab) lab.textContent = currentCollegeForEvents || "—";
+    currentCollegeForEvents = getUserCollege(userData) || currentCollegeForEvents;
+    if (lab) {
+        lab.textContent = currentCollegeForEvents
+            ? getCollegeDisplayName(currentCollegeForEvents)
+            : "—";
+    }
     m.classList.add("is-open");
     document.getElementById("new-event-title").value = "";
     document.getElementById("new-event-description").value = "";
@@ -896,8 +1384,9 @@ async function submitNewEvent(e) {
         showNotification("أدخلي اسم الفعالية.");
         return;
     }
-    if (!currentCollegeForEvents) {
-        showNotification("اختر الكلية من الصفحة الرئيسية أولاً.");
+    const adminCollege = getUserCollege(userData);
+    if (!adminCollege) {
+        showNotification("هذا الحساب غير مرتبط بكلية صالحة.");
         return;
     }
 
@@ -906,7 +1395,7 @@ async function submitNewEvent(e) {
         const db = await loadDb();
         const ev = {
             id: newUid(),
-            college: currentCollegeForEvents,
+            college: adminCollege,
             title,
             description,
             location,
@@ -940,6 +1429,11 @@ async function deleteCollegeEvent(eventId) {
     try {
         const db = await loadDb();
         console.log("Events before delete:", db.events.length);
+        const targetEvent = db.events.find((ev) => ev.id === eventId);
+        if (!targetEvent || !canAdminAccessCollege(targetEvent.college)) {
+            showNotification("لا تملكين صلاحية حذف هذه الفعالية.");
+            return;
+        }
         const next = db.events.filter((ev) => ev.id !== eventId);
         console.log("Events after filter:", next.length);
         if (next.length === db.events.length) {
@@ -978,7 +1472,7 @@ async function openVolunteerLogModal() {
 
     if (!completedRequests.length) {
         ul.innerHTML =
-            '<li class="volunteer-log-empty">لم تنجزي أي فعاليات بعد. انتظري موافقة المسؤولة على طلباتك.</li>';
+            '<li class="volunteer-log-empty">لم تنجزي أي فعاليات بعد. انتظري موافقة الإدارة على طلباتك.</li>';
         return;
     }
 
@@ -993,19 +1487,39 @@ async function openVolunteerLogModal() {
         .join("");
 }
 
-function openChat() {
-    if (!currentCollegeForEvents) return;
+async function openChat(eventId) {
+    if (!eventId) return;
     const modal = document.getElementById("chat-modal");
-    const collegeNameEl = document.getElementById("chat-college-name");
-    if (modal && collegeNameEl) {
-        collegeNameEl.textContent = currentCollegeForEvents;
-        modal.classList.add("is-open");
-        loadChatMessages();
+    const eventNameEl = document.getElementById("chat-event-name");
+    const eventSubtitleEl = document.getElementById("chat-event-subtitle");
+    if (!modal || !eventNameEl || !eventSubtitleEl) return;
+
+    const db = await loadDb();
+    const eventRecord = db.events.find((ev) => ev.id === eventId);
+    const requestRecord = db.requests.find(
+        (r) => r.userId === userData?.uid && r.eventId === eventId
+    );
+
+    if (!eventRecord) {
+        showNotification("الفعالية غير موجودة.");
+        return;
     }
+
+    if (!canUserAccessEventChat(userData, eventRecord, requestRecord)) {
+        showNotification("شات الفعالية متاح فقط للمشاركات المعتمدات.");
+        return;
+    }
+
+    currentEventChatId = eventId;
+    eventNameEl.textContent = eventRecord.title;
+    eventSubtitleEl.textContent = getCollegeDisplayName(eventRecord.college);
+    modal.classList.add("is-open");
+    loadChatMessages();
 }
 
 function closeChatModal() {
     const modal = document.getElementById("chat-modal");
+    currentEventChatId = "";
     if (modal) modal.classList.remove("is-open");
 }
 
@@ -1026,13 +1540,31 @@ function closeVolunteerLogModal() {
 
 async function loadChatMessages() {
     const messagesEl = document.getElementById("chat-messages");
-    if (!messagesEl || !currentCollegeForEvents) return;
+    if (!messagesEl || !currentEventChatId) return;
 
-    const { chats, users } = await loadDb();
+    const { chats, users, events, requests } = await loadDb();
+    const currentEvent = events.find((ev) => ev.id === currentEventChatId);
+    const requestRecord = requests.find(
+        (r) => r.userId === userData?.uid && r.eventId === currentEventChatId
+    );
+    if (!canUserAccessEventChat(userData, currentEvent, requestRecord)) {
+        closeChatModal();
+        showNotification("لم يعد لديك صلاحية دخول شات هذه الفعالية.");
+        return;
+    }
+
     const userMap = new Map(users.map(u => [u.uid, u]));
-    const collegeChats = chats.filter(c => c.college === currentCollegeForEvents).sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+    const eventChats = chats
+        .filter((c) => c.eventId === currentEventChatId)
+        .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 
-    messagesEl.innerHTML = collegeChats.map(chat => {
+    if (!eventChats.length) {
+        messagesEl.innerHTML =
+            '<div class="chat-empty-state">ابدئي أول رسالة في شات هذه الفعالية.</div>';
+        return;
+    }
+
+    messagesEl.innerHTML = eventChats.map(chat => {
         const user = userMap.get(chat.userId);
         const sender = user ? user.name : "مستخدم مجهول";
         const isOwn = chat.userId === userData?.uid;
@@ -1051,20 +1583,29 @@ async function loadChatMessages() {
 
 async function sendChatMessage() {
     const input = document.getElementById("chat-input");
-    if (!input || !userData || !currentCollegeForEvents) return;
+    if (!input || !userData || !currentEventChatId) return;
 
     const message = input.value.trim();
     if (!message) return;
 
+    const db = await loadDb();
+    const eventRecord = db.events.find((ev) => ev.id === currentEventChatId);
+    const requestRecord = db.requests.find(
+        (r) => r.userId === userData.uid && r.eventId === currentEventChatId
+    );
+    if (!canUserAccessEventChat(userData, eventRecord, requestRecord)) {
+        showNotification("لا تملكين صلاحية الكتابة في شات هذه الفعالية.");
+        return;
+    }
+
     const chat = {
         id: newUid(),
-        college: currentCollegeForEvents,
+        eventId: currentEventChatId,
         userId: userData.uid,
         message,
         timestamp: new Date().toISOString(),
     };
 
-    const db = await loadDb();
     db.chats.push(chat);
     await saveChats(db.chats);
 
@@ -1073,12 +1614,20 @@ async function sendChatMessage() {
 }
 
 function renderAdminPage() {
+    const usersSummary = document.getElementById("admin-users-summary");
+    const usersList = document.getElementById("admin-users-list");
     const list = document.getElementById("admin-events-list");
-    if (!list) return;
+    if (!list || !usersSummary || !usersList) return;
 
-    loadDb().then(({ events, requests, users }) => {
+    loadDb().then(({ events, requests, users, chats }) => {
+        const adminCollege = getUserCollege(userData);
+        const scopedEvents = events.filter(
+            (ev) => normalizeCollegeName(ev.college) === adminCollege
+        );
+        renderAdminUsersSection(users, events, requests, adminCollege);
         const userMap = new Map(users.map(u => [u.uid, u]));
         const requestMap = new Map();
+        const chatMap = new Map();
 
         requests.forEach(r => {
             if (!requestMap.has(r.eventId)) {
@@ -1087,13 +1636,31 @@ function renderAdminPage() {
             requestMap.get(r.eventId).push(r);
         });
 
-        if (!events.length) {
+        chats.forEach((chat) => {
+            if (!chat.eventId) return;
+            if (!chatMap.has(chat.eventId)) {
+                chatMap.set(chat.eventId, []);
+            }
+            chatMap.get(chat.eventId).push(chat);
+        });
+
+        if (!scopedEvents.length) {
             list.innerHTML = '<p style="text-align: center; color: #666;">لا توجد فعاليات مضافة بعد.</p>';
             return;
         }
 
-        list.innerHTML = events.map(ev => {
+        list.innerHTML = scopedEvents.map(ev => {
             const eventRequests = requestMap.get(ev.id) || [];
+            const eventChats = (chatMap.get(ev.id) || []).sort(
+                (a, b) => new Date(a.timestamp) - new Date(b.timestamp)
+            );
+            const lastChat = eventChats[eventChats.length - 1] || null;
+            const lastChatSender = lastChat
+                ? escapeHtml(userMap.get(lastChat.userId)?.name || "مستخدم مجهول")
+                : "";
+            const lastChatPreview = lastChat
+                ? escapeHtml(lastChat.message || "")
+                : "لا توجد رسائل بعد";
             const requestsHtml = eventRequests.map(r => {
                 const user = userMap.get(r.userId);
                 if (!user) return '';
@@ -1125,10 +1692,13 @@ function renderAdminPage() {
                         </button>
                     </div>
                     <div class="admin-event-details">
+                        <p><strong>الكلية:</strong> ${escapeHtml(getCollegeDisplayName(ev.college))}</p>
                         <p><strong>التاريخ:</strong> ${formatEventDateDisplay(ev.date)}</p>
                         <p><strong>الوقت:</strong> ${ev.timeStart || ''} - ${ev.timeEnd || ''}</p>
                         <p><strong>المكان:</strong> ${escapeHtml(ev.location || '')}</p>
                         <p><strong>الساعات:</strong> ${ev.volunteerHours || 4}</p>
+                        <p><strong>عدد الرسائل:</strong> ${eventChats.length}</p>
+                        <p><strong>آخر رسالة:</strong> ${lastChat ? `${lastChatSender}: ${lastChatPreview}` : lastChatPreview}</p>
                         ${ev.maxParticipants ? `<p><strong>الحد الأقصى:</strong> ${ev.maxParticipants}</p>` : ''}
                     </div>
                     <div class="admin-requests-list">
@@ -1144,13 +1714,16 @@ function renderAdminPage() {
 function bindAdminTableSync() {
     clearAdminSubscription();
 
-    const table = document.getElementById("admin-table-body");
-    table.innerHTML =
-        "<tr><td colspan='3' style='text-align:center;'>جاري جلب قائمة الطالبات...</td></tr>";
+    const usersList = document.getElementById("admin-users-list");
+    if (!usersList) return;
+    usersList.innerHTML =
+        '<div class="admin-empty-state">جاري جلب بيانات المستخدمين...</div>';
 
     adminSyncHandler = () => {
         loadDb()
-            .then((db) => renderAdminTable(db.users, db.events))
+            .then(({ users, events, requests }) =>
+                renderAdminUsersSection(users, events, requests, getUserCollege(userData))
+            )
             .catch((err) => console.error(err));
     };
     window.addEventListener("athar-db-changed", adminSyncHandler);
@@ -1175,12 +1748,17 @@ async function approveRequest(requestId) {
             return;
         }
 
+        const event = db.events.find(e => e.id === request.eventId);
+        if (!event || !canAdminAccessCollege(event.college)) {
+            showNotification("لا تملكين صلاحية تعديل هذا الطلب.");
+            return;
+        }
+
         request.status = "completed";
 
         // إضافة الساعات للمستخدم
         const user = db.users.find(u => u.uid === request.userId);
         if (user) {
-            const event = db.events.find(e => e.id === request.eventId);
             if (event) {
                 const hours = parseInt(event.volunteerHours, 10) || 4;
                 user.hours = (parseInt(user.hours, 10) || 0) + hours;
@@ -1215,12 +1793,17 @@ async function rejectRequest(requestId) {
             return;
         }
 
+        const event = db.events.find(e => e.id === request.eventId);
+        if (!event || !canAdminAccessCollege(event.college)) {
+            showNotification("لا تملكين صلاحية تعديل هذا الطلب.");
+            return;
+        }
+
         request.status = "pending";
 
         // إزالة الساعات من المستخدم
         const user = db.users.find(u => u.uid === request.userId);
         if (user) {
-            const event = db.events.find(e => e.id === request.eventId);
             if (event) {
                 const hours = parseInt(event.volunteerHours, 10) || 4;
                 user.hours = Math.max(0, (parseInt(user.hours, 10) || 0) - hours);
@@ -1277,7 +1860,6 @@ function logout() {
     document.getElementById("login-password").value = "";
     document.getElementById("reg-fullname").value = "";
     document.getElementById("reg-phone").value = "";
-    document.getElementById("reg-dob").value = "";
 
     // إعادة تعيين الـ hash
     routerSuppressHash = true;
@@ -1358,13 +1940,14 @@ function applyRouteFromHash() {
 
     if (route === "home") {
         currentCollegeForEvents = "";
+        renderHomeColleges();
         applyPageView("home-page");
     } else if (route === "profile") {
         currentCollegeForEvents = "";
         applyPageView("profile-page");
     } else if (route === "admin") {
         if (!userData || userData.role !== "admin") {
-            showNotification("هذه الصفحة خاصة بالمسؤولة.");
+            showNotification("هذه الصفحة خاصة بالإدارة.");
             routerSuppressHash = true;
             location.hash = "#/home";
             setTimeout(() => {
@@ -1374,6 +1957,7 @@ function applyRouteFromHash() {
             applyPageView("home-page");
             return;
         }
+        currentCollegeForEvents = getUserCollege(userData);
         applyPageView("admin-page");
         renderAdminPage();
     } else if (route === "events") {
@@ -1387,19 +1971,34 @@ function applyRouteFromHash() {
             applyPageView("home-page");
             return;
         }
-        currentCollegeForEvents = college;
+        const normalizedCollege = normalizeCollegeName(college);
+        if (userData && userData.role === "admin" && !canAdminAccessCollege(normalizedCollege)) {
+            currentCollegeForEvents = getUserCollege(userData);
+            routerSuppressHash = true;
+            location.hash = "#/home";
+            setTimeout(() => {
+                routerSuppressHash = false;
+            }, 0);
+            renderHomeColleges();
+            applyPageView("home-page");
+            return;
+        }
+        currentCollegeForEvents = normalizedCollege;
         const titleEl = document.getElementById("college-name-display");
-        if (titleEl) titleEl.textContent = "فعاليات كلية " + college;
+        if (titleEl) titleEl.textContent = "فعاليات " + getCollegeDisplayName(normalizedCollege);
         applyPageView("events-page");
         refreshEventsListUI().catch(console.error);
     } else {
         currentCollegeForEvents = "";
+        renderHomeColleges();
         applyPageView("home-page");
     }
 }
 
 function goToPage(id) {
-    if (id !== "events-page") {
+    if (id === "admin-page" && userData && userData.role === "admin") {
+        currentCollegeForEvents = getUserCollege(userData);
+    } else if (id !== "events-page") {
         currentCollegeForEvents = "";
     }
     applyPageView(id);
@@ -1429,12 +2028,24 @@ function toggleNavMenu() {
 
 window.addEventListener("athar-db-changed", () => {
     const ep = document.getElementById("events-page");
+    const adminPage = document.getElementById("admin-page");
     if (
         ep &&
         ep.classList.contains("active") &&
         currentCollegeForEvents
     ) {
         refreshEventsListUI().catch(console.error);
+    }
+    if (
+        adminPage &&
+        adminPage.classList.contains("active") &&
+        userData &&
+        userData.role === "admin"
+    ) {
+        renderAdminPage();
+    }
+    if (currentEventChatId) {
+        loadChatMessages().catch(console.error);
     }
 });
 
@@ -1450,7 +2061,24 @@ function handleEventsListClick(e) {
         if (id) deleteCollegeEvent(id);
         return;
     }
-    if (e.target.closest("a.btn-whatsapp")) {
+    const chatBtn = e.target.closest(".btn-chat[data-chat-event-id]");
+    if (chatBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        const id = chatBtn.getAttribute("data-chat-event-id");
+        if (id) {
+            openChat(id).catch(console.error);
+        }
+        return;
+    }
+    const joinBtn = e.target.closest(".btn-join-event[data-join-event-id]");
+    if (joinBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        const id = joinBtn.getAttribute("data-join-event-id");
+        if (id) {
+            sendJoinRequest(id).catch(console.error);
+        }
         return;
     }
     const card = e.target.closest(".event-card[data-event-id]");
@@ -1467,7 +2095,7 @@ function handleEventsListClick(e) {
     
     if (userData.role === "admin") {
         console.log("Admin user clicked event card - ignoring");
-        return; // المسؤولة لا ترسل طلبات
+        return; // حساب الإدارة لا يرسل طلبات
     }
     
     e.preventDefault();
@@ -1475,7 +2103,7 @@ function handleEventsListClick(e) {
     const id = card.getAttribute("data-event-id");
     console.log("Event card clicked:", id, "User role:", userData.role);
     if (id) {
-        sendJoinRequest(id);
+        sendJoinRequest(id).catch(console.error);
     }
 }
     // }
@@ -1488,25 +2116,30 @@ document.addEventListener("DOMContentLoaded", () => {
         try {
             const parsed = JSON.parse(sessionData);
             if (parsed && parsed.uid && parsed.email) {
-                userData = parsed;
-                // إعادة تشغيل الاشتراكات إذا لزم الأمر
-                if (userData.role !== "admin") {
-                    subscribeCurrentUserHours(userData.uid);
-                }
-                // الانتقال مباشرة إلى التطبيق
-                document.getElementById("login-wrapper").style.display = "none";
-                document.getElementById("site-content").style.display = "block";
-                document.querySelector(".site-nav").style.display = "flex";
-                document.getElementById("about-modal").style.display = "none";
-                updateNavForRole();
-                if (userData.role !== "admin") {
-                    void refreshVolunteerHoursUI();
+                if (parsed.role === "admin" && !isAdminEmail(parsed.email)) {
+                    localStorage.removeItem("athar_user_session");
                 } else {
-                    updateChart(0);
+                    userData = toPublicUser(parsed);
+                    renderHomeColleges();
+                    // إعادة تشغيل الاشتراكات إذا لزم الأمر
+                    if (userData.role !== "admin") {
+                        subscribeCurrentUserHours(userData.uid);
+                    }
+                    // الانتقال مباشرة إلى التطبيق
+                    document.getElementById("login-wrapper").style.display = "none";
+                    document.getElementById("site-content").style.display = "block";
+                    document.querySelector(".site-nav").style.display = "flex";
+                    document.getElementById("about-modal").style.display = "none";
+                    updateNavForRole();
+                    if (userData.role !== "admin") {
+                        void refreshVolunteerHoursUI();
+                    } else {
+                        updateChart(0);
+                    }
+                    // تطبيق الـ route من الـ hash
+                    applyRouteFromHash();
+                    return; // لا نستمر في إعداد الـ login
                 }
-                // تطبيق الـ route من الـ hash
-                applyRouteFromHash();
-                return; // لا نستمر في إعداد الـ login
             }
         } catch (e) {
             console.warn("فشل استعادة الجلسة:", e);
@@ -1520,6 +2153,22 @@ document.addEventListener("DOMContentLoaded", () => {
     if (eventsListEl) {
         eventsListEl.addEventListener("click", handleEventsListClick);
     }
+
+    const authEmailEl = document.getElementById("reg-email");
+    if (authEmailEl) {
+        authEmailEl.addEventListener("input", sanitizeStudentIdInput);
+    }
+
+    ["forgot-password-new", "forgot-password-confirm"].forEach((id) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") {
+                e.preventDefault();
+                handleForgotPasswordReset();
+            }
+        });
+    });
 
     const toggle = document.getElementById("nav-menu-toggle");
     if (toggle) {

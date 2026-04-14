@@ -7,11 +7,8 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <title>مشروع أثر | التطوع الجامعي</title>
+  <link rel="icon" type="image/png" href="./imgs/logo.png" />
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet" />
-  <link
-      rel="stylesheet"
-      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
-    />
   <link rel="stylesheet" href="./assets/fontawesome-free-6.7.2-web/fontawesome-free-6.7.2-web/css/all.min.css">
   <link rel="stylesheet" href="./style.css">
 </head>
@@ -55,14 +52,14 @@
             <label for="reg-phone">رقم الجوال</label>
             <input type="tel" id="reg-phone" placeholder="05xxxxxxxx" autocomplete="tel" />
           </div>
-          <div class="input-group">
-            <label for="reg-dob">تاريخ الميلاد</label>
-            <input type="date" id="reg-dob" autocomplete="bday" />
-          </div>
         </div>
         <div class="input-group">
-          <label for="reg-email">البريد الجامعي</label>
-          <input type="email" id="reg-email" placeholder="44****@pnu.edu.sa" required autocomplete="username" />
+          <label for="reg-email">الرقم الجامعي</label>
+          <div class="email-field">
+            <span class="email-field__suffix">@pnu.edu.sa</span>
+            <input type="text" id="reg-email" placeholder="أدخلي 9 أرقام" required autocomplete="username"
+              inputmode="numeric" maxlength="9" dir="ltr" />
+          </div>
         </div>
         <div class="input-group">
           <label for="login-password">كلمة المرور</label>
@@ -73,6 +70,25 @@
           تسجيل الدخول
         </button>
       </form>
+      <button type="button" id="forgot-password-trigger" class="auth-link-btn" onclick="toggleForgotPasswordPanel()">
+        هل نسيت كلمة المرور؟
+      </button>
+      <div id="forgot-password-panel" class="forgot-password-panel" hidden>
+        <h3 class="forgot-password-title">إعادة تعيين كلمة المرور</h3>
+        <p class="forgot-password-hint">سيتم تغيير كلمة المرور للحساب المرتبط بالرقم الجامعي الذي أدخلته بالأعلى.</p>
+        <div class="input-group">
+          <label for="forgot-password-new">كلمة المرور الجديدة</label>
+          <input type="password" id="forgot-password-new" placeholder="********" minlength="6" autocomplete="new-password" />
+        </div>
+        <div class="input-group">
+          <label for="forgot-password-confirm">إعادة كتابة كلمة المرور الجديدة</label>
+          <input type="password" id="forgot-password-confirm" placeholder="********" minlength="6" autocomplete="new-password" />
+        </div>
+        <div class="forgot-password-actions">
+          <button type="button" class="btn-modal-secondary" onclick="toggleForgotPasswordPanel(false)">إلغاء</button>
+          <button type="button" class="btn-login forgot-password-submit" onclick="handleForgotPasswordReset()">تغيير كلمة المرور</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -160,20 +176,7 @@
       </header>
       <div class="container">
         <h2 class="section-title">الكليات المتاحة</h2>
-        <div class="colleges-grid">
-          <div class="college-card" onclick="openEvents('علوم الحاسب')">
-            <span class="college-icon">💻</span><strong>كلية الحاسب</strong>
-          </div>
-          <div class="college-card" onclick="openEvents('التصاميم')">
-            <span class="college-icon">🎨</span><strong>كلية التصاميم</strong>
-          </div>
-          <div class="college-card" onclick="openEvents('التمريض')">
-            <span class="college-icon">🏥</span><strong>كلية التمريض</strong>
-          </div>
-          <div class="college-card" onclick="openEvents('اللغات')">
-            <span class="college-icon">🌐</span><strong>كلية اللغات</strong>
-          </div>
-        </div>
+        <div class="colleges-grid" id="colleges-grid"></div>
       </div>
     </div>
 
@@ -192,9 +195,6 @@
         </button>
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
           <h2 class="section-title" id="college-name-display">الفعاليات</h2>
-          <button type="button" class="btn-chat" onclick="openChat()">
-            <i class="fas fa-comments"></i> الشات الجماعي
-          </button>
         </div>
         <div id="events-list"></div>
         <button type="button" id="fab-add-event" class="fab-add-event is-hidden" onclick="openAddEventModal()"
@@ -236,10 +236,6 @@
                 <i class="fas fa-phone"></i> <b>الجوال:</b>
                 <span id="prof-phone">-</span>
               </div>
-              <div class="info-item">
-                <i class="fas fa-calendar-alt"></i> <b>الميلاد:</b>
-                <span id="prof-dob">-</span>
-              </div>
             </div>
           </div>
           <div class="p-box">
@@ -275,11 +271,29 @@
 
     <div id="admin-page" class="page">
       <div class="container">
-        <h2 class="section-title">لوحة إدارة الفعاليات والطلبات</h2>
+        <h2 class="section-title">لوحة الإدارة</h2>
+        <div class="admin-section">
+          <div class="admin-section-header">
+            <div>
+              <h3 class="admin-section-title">بيانات المستخدمين</h3>
+              <p class="admin-section-subtitle">يمكن لجميع حسابات الإدارة الاطلاع على بيانات الطالبات وساعاتهن التطوعية.</p>
+            </div>
+          </div>
+          <div id="admin-users-summary" class="admin-users-summary"></div>
+          <div id="admin-users-list" class="admin-users-grid"></div>
+        </div>
+        <div class="admin-section">
+          <div class="admin-section-header">
+            <div>
+              <h3 class="admin-section-title">إدارة الفعاليات والطلبات</h3>
+              <p class="admin-section-subtitle">تظل صلاحيات إدارة الفعاليات والطلبات مرتبطة بالكلية الخاصة بحساب الإدارة.</p>
+            </div>
+          </div>
         <div id="admin-events-list"></div>
         <button type="button" class="btn-login" style="margin-top: 20px" onclick="openAddEventModal()">
           <i class="fas fa-plus"></i> إضافة فعالية جديدة
         </button>
+        </div>
       </div>
     </div>
 
@@ -350,7 +364,8 @@
     <div id="chat-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="chat-title"
       onclick="closeChatModal()">
       <div class="modal-panel modal-panel--chat" onclick="event.stopPropagation()">
-        <h3 id="chat-title" class="modal-title">الشات الجماعي - <span id="chat-college-name"></span></h3>
+        <h3 id="chat-title" class="modal-title">شات الفعالية - <span id="chat-event-name"></span></h3>
+        <p class="modal-subtitle" id="chat-event-subtitle"></p>
         <div id="chat-messages" class="chat-messages"></div>
         <div class="chat-input-container">
           <input type="text" id="chat-input" placeholder="اكتبي رسالتك هنا..." maxlength="500" />
