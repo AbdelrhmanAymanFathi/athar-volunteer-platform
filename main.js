@@ -14,6 +14,8 @@ const LEGACY_LS_KEY = "athar_local_v1";
 const ADMIN_ACCOUNTS_SEED_KEY = "athar_college_admin_seed_version";
 const ADMIN_ACCOUNTS_SEED_VERSION = "v1";
 const STUDENT_EMAIL_DOMAIN = "pnu.edu.sa";
+const DB_SYNC_CHANNEL_NAME = "athar_db_sync";
+const DB_SYNC_STORAGE_KEY = "athar_db_sync_ping";
 
 const COLLEGE_CATALOG = [
     {
@@ -90,6 +92,13 @@ const COLLEGE_NAME_ALIASES = {
 
 let idbConnection = null;
 let idbInitPromise = null;
+let dbSyncChannel = null;
+let dbSyncReady = false;
+
+const DB_SYNC_TAB_ID =
+    (typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : "tab_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8));
 
 let userData = null;
 let hoursUnsub = null;
@@ -117,6 +126,57 @@ function showNotification(message, duration = 4000) {
 
 function showLoader(v) {
     document.getElementById("loader").style.display = v ? "flex" : "none";
+}
+
+function dispatchDbChangedEvent() {
+    window.dispatchEvent(new CustomEvent("athar-db-changed"));
+}
+
+function broadcastDbChange() {
+    const payload = {
+        type: "athar-db-changed",
+        sourceTabId: DB_SYNC_TAB_ID,
+        timestamp: Date.now(),
+    };
+
+    dispatchDbChangedEvent();
+
+    if (dbSyncChannel) {
+        dbSyncChannel.postMessage(payload);
+    }
+
+    try {
+        localStorage.setItem(DB_SYNC_STORAGE_KEY, JSON.stringify(payload));
+    } catch (err) {
+        console.warn("Athar: تعذر إرسال مزامنة localStorage", err);
+    }
+}
+
+function handleIncomingDbSync(payload) {
+    if (!payload || payload.type !== "athar-db-changed") return;
+    if (payload.sourceTabId === DB_SYNC_TAB_ID) return;
+    dispatchDbChangedEvent();
+}
+
+function setupDbSync() {
+    if (dbSyncReady) return;
+    dbSyncReady = true;
+
+    if (typeof BroadcastChannel !== "undefined") {
+        dbSyncChannel = new BroadcastChannel(DB_SYNC_CHANNEL_NAME);
+        dbSyncChannel.addEventListener("message", (event) => {
+            handleIncomingDbSync(event.data);
+        });
+    }
+
+    window.addEventListener("storage", (event) => {
+        if (event.key !== DB_SYNC_STORAGE_KEY || !event.newValue) return;
+        try {
+            handleIncomingDbSync(JSON.parse(event.newValue));
+        } catch (err) {
+            console.warn("Athar: تعذر قراءة مزامنة localStorage", err);
+        }
+    });
 }
 
 function openIdb() {
@@ -200,7 +260,7 @@ function idbReplaceAllUsers(db, users) {
             store.put(users[i]);
         }
         tx.oncomplete = () => {
-            window.dispatchEvent(new CustomEvent("athar-db-changed"));
+            broadcastDbChange();
             resolve();
         };
         tx.onerror = () => reject(tx.error);
@@ -217,7 +277,7 @@ function idbReplaceAllEvents(db, events) {
             store.put(events[i]);
         }
         tx.oncomplete = () => {
-            window.dispatchEvent(new CustomEvent("athar-db-changed"));
+            broadcastDbChange();
             resolve();
         };
         tx.onerror = () => reject(tx.error);
@@ -234,7 +294,7 @@ function idbReplaceAllRequests(db, requests) {
             store.put(requests[i]);
         }
         tx.oncomplete = () => {
-            window.dispatchEvent(new CustomEvent("athar-db-changed"));
+            broadcastDbChange();
             resolve();
         };
         tx.onerror = () => reject(tx.error);
@@ -251,7 +311,7 @@ function idbReplaceAllChats(db, chats) {
             store.put(chats[i]);
         }
         tx.oncomplete = () => {
-            window.dispatchEvent(new CustomEvent("athar-db-changed"));
+            broadcastDbChange();
             resolve();
         };
         tx.onerror = () => reject(tx.error);
@@ -713,6 +773,17 @@ function isValidStudentEmailLocalPart(value) {
     return /^\d{9}$/.test(String(value || "").trim());
 }
 
+function isStrongPassword(password) {
+    const value = String(password || "");
+    return (
+        value.length >= 8 &&
+        /[A-Z]/.test(value) &&
+        /[a-z]/.test(value) &&
+        /\d/.test(value) &&
+        /[^A-Za-z0-9]/.test(value)
+    );
+}
+
 function toPublicUser(u) {
     const row = normalizeUserRow(u);
     const ids = Array.isArray(row.volunteerEventIds) ? row.volunteerEventIds : [];
@@ -922,6 +993,7 @@ function setAuthMode(mode) {
     const pw = document.getElementById("login-password");
     if (pw) {
         pw.setAttribute("autocomplete", isRegister ? "new-password" : "current-password");
+        pw.minLength = isRegister ? 8 : 6;
     }
 }
 
@@ -940,8 +1012,10 @@ async function handleForgotPasswordReset() {
         showNotification("أدخلي الرقم الجامعي الصحيح أولاً.");
         return;
     }
-    if (!newPassword || newPassword.length < 6) {
-        showNotification("كلمة المرور الجديدة مطلوبة ولا تقل عن 6 أحرف.");
+    if (!isStrongPassword(newPassword)) {
+        showNotification(
+            "كلمة المرور الجديدة يجب أن تكون 8 أحرف على الأقل وتحتوي على حرف كبير وحرف صغير ورقم ورمز خاص."
+        );
         return;
     }
     if (newPassword !== confirmPassword) {
@@ -1056,8 +1130,10 @@ async function handleRegister() {
         showNotification("يجب إدخال الرقم الجامعي من 9 أرقام.");
         return;
     }
-    if (!password || password.length < 6) {
-        showNotification("كلمة المرور مطلوبة ولا تقل عن 6 أحرف.");
+    if (!isStrongPassword(password)) {
+        showNotification(
+            "كلمة المرور يجب أن تكون 8 أحرف على الأقل وتحتوي على حرف كبير وحرف صغير ورقم ورمز خاص."
+        );
         return;
     }
     if (!phone) {
@@ -2120,6 +2196,8 @@ function handleEventsListClick(e) {
 
 
 document.addEventListener("DOMContentLoaded", () => {
+    setupDbSync();
+
     // استعادة الجلسة من localStorage
     const sessionData = localStorage.getItem("athar_user_session");
     if (sessionData) {

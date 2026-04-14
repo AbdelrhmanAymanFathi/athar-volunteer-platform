@@ -63,16 +63,19 @@
           </div>
           <div class="register-hint register-hint--email auth-register-only" id="register-email-hint" hidden>
             <i class="fas fa-info-circle"></i> الرقم الجامعي يبدأ بـ <b>44</b> — مثال: <b>441234</b><br>
-            <span class="register-hint__muted">(⚠️ غير رقم الهوية الوطني المكون من 10 أرقام)</span>
+            <!-- <span class="register-hint__muted">(⚠️ غير رقم الهوية الوطني المكون من 10 أرقام)</span> -->
           </div>
         </div>
         <div class="input-group">
           <label for="login-password">كلمة المرور</label>
-          <input type="password" id="login-password" placeholder="********" required minlength="6"
+          <input type="password" id="login-password" placeholder="********" required minlength="8"
             autocomplete="current-password" />
           <div class="password-hints auth-register-only" id="pw-hints" hidden>
-            <span id="pw-format" class="invalid"><i class="fas fa-circle password-hints__dot"></i> يجب أن تبدأ بـ <b>pnu@</b> ثم رقم الهوية الوطنية (10 أرقام)</span>
-            <span class="password-hints__example">مثال: pnu@1234567890</span>
+            <span class="invalid"><i class="fas fa-circle password-hints__dot"></i> 8 أحرف على الأقل</span>
+            <span class="invalid"><i class="fas fa-circle password-hints__dot"></i> حرف كبير واحد على الأقل (A-Z)</span>
+            <span class="invalid"><i class="fas fa-circle password-hints__dot"></i> حرف صغير واحد على الأقل (a-z)</span>
+            <span class="invalid"><i class="fas fa-circle password-hints__dot"></i> رقم واحد على الأقل (0-9)</span>
+            <span class="invalid"><i class="fas fa-circle password-hints__dot"></i> رمز خاص واحد على الأقل (!@#$...)</span>
           </div>
         </div>
         <button type="submit" class="btn-login" id="auth-submit-btn">
@@ -87,11 +90,11 @@
         <p class="forgot-password-hint">سيتم تغيير كلمة المرور للحساب المرتبط بالرقم الجامعي الذي أدخلته بالأعلى.</p>
         <div class="input-group">
           <label for="forgot-password-new">كلمة المرور الجديدة</label>
-          <input type="password" id="forgot-password-new" placeholder="********" minlength="6" autocomplete="new-password" />
+          <input type="password" id="forgot-password-new" placeholder="********" minlength="8" autocomplete="new-password" />
         </div>
         <div class="input-group">
           <label for="forgot-password-confirm">إعادة كتابة كلمة المرور الجديدة</label>
-          <input type="password" id="forgot-password-confirm" placeholder="********" minlength="6" autocomplete="new-password" />
+          <input type="password" id="forgot-password-confirm" placeholder="********" minlength="8" autocomplete="new-password" />
         </div>
         <div class="forgot-password-actions">
           <button type="button" class="btn-modal-secondary" onclick="toggleForgotPasswordPanel(false)">إلغاء</button>
