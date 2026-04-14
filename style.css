@@ -505,11 +505,55 @@
 
       .email-field__suffix {
           flex-shrink: 0;
-          padding: 0 14px;
+          padding: 2% 14px;
           color: #5f6f6f;
           font-weight: 700;
           border-left: 1px solid rgba(0, 96, 100, 0.12);
           background: rgba(0, 96, 100, 0.04);
+      }
+
+      .register-hint,
+      .password-hints {
+          margin-top: 8px;
+          line-height: 1.8;
+          font-size: 0.78rem;
+      }
+
+      .register-hint[hidden],
+      .password-hints[hidden],
+      .auth-register-only[hidden] {
+          display: none !important;
+      }
+
+      .auth-register-only {
+          display: none;
+      }
+
+      #login-wrapper[data-auth-mode="register"] .auth-register-only:not([hidden]) {
+          display: block;
+      }
+
+      .register-hint {
+          color: #888;
+      }
+
+      .register-hint__muted,
+      .password-hints__example {
+          color: #aaa;
+      }
+
+      .password-hints {
+          display: grid;
+          gap: 4px;
+      }
+
+      .password-hints .invalid {
+          color: #d24545;
+          font-weight: 600;
+      }
+
+      .password-hints__dot {
+          font-size: 0.5rem;
       }
 
       #reg-extra-fields {

@@ -870,6 +870,15 @@ function syncForgotPasswordVisibility(mode) {
     }
 }
 
+function syncRegisterHintsVisibility(mode) {
+    const isRegister = mode === "register";
+    const emailHint = document.getElementById("register-email-hint");
+    const passwordHints = document.getElementById("pw-hints");
+
+    if (emailHint) emailHint.hidden = !isRegister;
+    if (passwordHints) passwordHints.hidden = !isRegister;
+}
+
 function sanitizeStudentIdInput() {
     const emailInput = document.getElementById("reg-email");
     if (!emailInput || getAuthMode() !== "register") return;
@@ -893,6 +902,7 @@ function setAuthMode(mode) {
     extra.hidden = !isRegister;
     syncAuthEmailField(mode);
     syncForgotPasswordVisibility(mode);
+    syncRegisterHintsVisibility(mode);
     if (isRegister) {
         sanitizeStudentIdInput();
     }

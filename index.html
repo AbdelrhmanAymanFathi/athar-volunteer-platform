@@ -56,15 +56,24 @@
         <div class="input-group">
           <label for="reg-email">الرقم الجامعي</label>
           <div class="email-field">
-            <span class="email-field__suffix">@pnu.edu.sa</span>
+            
             <input type="text" id="reg-email" placeholder="أدخلي 9 أرقام" required autocomplete="username"
               inputmode="numeric" maxlength="9" dir="ltr" />
+              <span class="email-field__suffix">@pnu.edu.sa</span>
+          </div>
+          <div class="register-hint register-hint--email auth-register-only" id="register-email-hint" hidden>
+            <i class="fas fa-info-circle"></i> الرقم الجامعي يبدأ بـ <b>44</b> — مثال: <b>441234</b><br>
+            <span class="register-hint__muted">(⚠️ غير رقم الهوية الوطني المكون من 10 أرقام)</span>
           </div>
         </div>
         <div class="input-group">
           <label for="login-password">كلمة المرور</label>
           <input type="password" id="login-password" placeholder="********" required minlength="6"
             autocomplete="current-password" />
+          <div class="password-hints auth-register-only" id="pw-hints" hidden>
+            <span id="pw-format" class="invalid"><i class="fas fa-circle password-hints__dot"></i> يجب أن تبدأ بـ <b>pnu@</b> ثم رقم الهوية الوطنية (10 أرقام)</span>
+            <span class="password-hints__example">مثال: pnu@1234567890</span>
+          </div>
         </div>
         <button type="submit" class="btn-login" id="auth-submit-btn">
           تسجيل الدخول
