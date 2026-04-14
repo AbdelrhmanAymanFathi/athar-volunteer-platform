@@ -2433,45 +2433,6 @@ function handleEventsListClick(e) {
 document.addEventListener("DOMContentLoaded", () => {
     setupDbSync();
 
-    // استعادة الجلسة من localStorage
-    const sessionData = localStorage.getItem("athar_user_session");
-    if (sessionData) {
-        try {
-            const parsed = JSON.parse(sessionData);
-            if (parsed && parsed.uid && parsed.email) {
-                if (parsed.role === "admin" && !isAdminEmail(parsed.email)) {
-                    localStorage.removeItem("athar_user_session");
-                } else {
-                    userData = toPublicUser(parsed);
-                    renderHomeColleges();
-                    // إعادة تشغيل الاشتراكات إذا لزم الأمر
-                    if (userData.role !== "admin") {
-                        subscribeCurrentUserHours(userData.uid);
-                    }
-                    // الانتقال مباشرة إلى التطبيق
-                    document.getElementById("login-wrapper").style.display = "none";
-                    document.getElementById("site-content").style.display = "block";
-                    document.querySelector(".site-nav").style.display = "flex";
-                    document.getElementById("about-modal").style.display = "none";
-                    updateNavForRole();
-                    if (userData.role !== "admin") {
-                        void refreshVolunteerHoursUI();
-                    } else {
-                        updateChart(0);
-                    }
-                    // تطبيق الـ route من الـ hash
-                    applyRouteFromHash();
-                    return; // لا نستمر في إعداد الـ login
-                }
-            }
-        } catch (e) {
-            console.warn("فشل استعادة الجلسة:", e);
-            localStorage.removeItem("athar_user_session");
-        }
-    }
-
-    setAuthMode("login");
-
     const eventsListEl = document.getElementById("events-list");
     if (eventsListEl) {
         eventsListEl.addEventListener("click", handleEventsListClick);
@@ -2526,4 +2487,43 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("chat-input")?.addEventListener("keypress", (e) => {
         if (e.key === "Enter") sendChatMessage();
     });
+
+    // استعادة الجلسة من localStorage
+    const sessionData = localStorage.getItem("athar_user_session");
+    if (sessionData) {
+        try {
+            const parsed = JSON.parse(sessionData);
+            if (parsed && parsed.uid && parsed.email) {
+                if (parsed.role === "admin" && !isAdminEmail(parsed.email)) {
+                    localStorage.removeItem("athar_user_session");
+                } else {
+                    userData = toPublicUser(parsed);
+                    renderHomeColleges();
+                    // إعادة تشغيل الاشتراكات إذا لزم الأمر
+                    if (userData.role !== "admin") {
+                        subscribeCurrentUserHours(userData.uid);
+                    }
+                    // الانتقال مباشرة إلى التطبيق
+                    document.getElementById("login-wrapper").style.display = "none";
+                    document.getElementById("site-content").style.display = "block";
+                    document.querySelector(".site-nav").style.display = "flex";
+                    document.getElementById("about-modal").style.display = "none";
+                    updateNavForRole();
+                    if (userData.role !== "admin") {
+                        void refreshVolunteerHoursUI();
+                    } else {
+                        updateChart(0);
+                    }
+                    // تطبيق الـ route من الـ hash
+                    applyRouteFromHash();
+                    return; // لا نستمر في إعداد الـ login
+                }
+            }
+        } catch (e) {
+            console.warn("فشل استعادة الجلسة:", e);
+            localStorage.removeItem("athar_user_session");
+        }
+    }
+
+    setAuthMode("login");
 });
