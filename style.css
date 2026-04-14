@@ -1,7 +1,7 @@
       :root {
-          --primary: #006064;
+          --primary: #004d40;
           /* أخضر بترولي غني */
-          --secondary: #00838f;
+          --secondary: #025e4e;
           --accent: #f3e5ab;
           --bg: #f4f7f6;
           --white: #ffffff;
@@ -654,10 +654,8 @@
 
       /* الهيرو والشبكة */
       .hero {
-          background:
-              linear-gradient(rgba(0, 96, 100, 0.85), rgba(0, 96, 100, 0.85)),
-              url("https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=1200&q=80");
-          background-size: cover;
+             background: linear-gradient(rgb(0 77 64), rgba(0,79, 60, 0.85));
+
           height: 220px;
           display: flex;
           align-items: center;
