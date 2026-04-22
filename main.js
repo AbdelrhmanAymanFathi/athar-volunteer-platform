@@ -13,9 +13,15 @@ const CHATS_STORE = "chats";
 const LEGACY_LS_KEY = "athar_local_v1";
 const ADMIN_ACCOUNTS_SEED_KEY = "athar_college_admin_seed_version";
 const ADMIN_ACCOUNTS_SEED_VERSION = "v1";
+const REQUEST_STATUS_PENDING = "pending";
+const REQUEST_STATUS_APPROVED = "approved";
+const REQUEST_STATUS_WAITLISTED = "waitlisted";
+const REQUEST_STATUS_COMPLETED = "completed";
+const REQUEST_STATUS_WITHDRAWN = "withdrawn";
 const STUDENT_EMAIL_DOMAIN = "pnu.edu.sa";
 const DB_SYNC_CHANNEL_NAME = "athar_db_sync";
 const DB_SYNC_STORAGE_KEY = "athar_db_sync_ping";
+const EVENT_MEMBERS_EXPANDED_STORAGE_KEY = "athar_event_members_expanded_state";
 
 const COLLEGE_CATALOG = [
     {
@@ -109,6 +115,7 @@ let hoursUnsub = null;
 let adminUnsub = null;
 let hoursSyncHandler = null;
 let adminSyncHandler = null;
+let eventMembersExpandedState = new Map();
 
 /** كلية الفعاليات المعروضة حالياً */
 let currentCollegeForEvents = "";
@@ -130,6 +137,60 @@ function showNotification(message, duration = 4000) {
 
 function showLoader(v) {
     document.getElementById("loader").style.display = v ? "flex" : "none";
+}
+
+function getEventMembersExpandedStorageKey() {
+    return `${EVENT_MEMBERS_EXPANDED_STORAGE_KEY}:${userData?.uid || "guest"}`;
+}
+
+function restoreEventMembersExpandedState() {
+    try {
+        const raw = localStorage.getItem(getEventMembersExpandedStorageKey());
+        if (!raw) {
+            eventMembersExpandedState = new Map();
+            return;
+        }
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== "object") {
+            eventMembersExpandedState = new Map();
+            return;
+        }
+        eventMembersExpandedState = new Map(
+            Object.entries(parsed).map(([eventId, expanded]) => [
+                eventId,
+                Boolean(expanded),
+            ])
+        );
+    } catch (err) {
+        console.warn("Athar: تعذر استعادة حالة طي الأعضاء", err);
+        eventMembersExpandedState = new Map();
+    }
+}
+
+function persistEventMembersExpandedState() {
+    try {
+        localStorage.setItem(
+            getEventMembersExpandedStorageKey(),
+            JSON.stringify(Object.fromEntries(eventMembersExpandedState))
+        );
+    } catch (err) {
+        console.warn("Athar: تعذر حفظ حالة طي الأعضاء", err);
+    }
+}
+
+function isEventMembersPanelExpanded(eventId, defaultOpen = false) {
+    if (!eventId) return defaultOpen;
+    if (eventMembersExpandedState.has(eventId)) {
+        return eventMembersExpandedState.get(eventId);
+    }
+    return defaultOpen;
+}
+
+function handleEventMembersToggle(event, eventId) {
+    const detailsEl = event?.currentTarget;
+    if (!detailsEl || !eventId) return;
+    eventMembersExpandedState.set(eventId, Boolean(detailsEl.open));
+    persistEventMembersExpandedState();
 }
 
 function updateDbJsonStatus(message, isError = false) {
@@ -292,7 +353,9 @@ function normalizeImportedDbPayload(payload) {
             ? imported.users.map(normalizeUserRow)
             : [],
         events: Array.isArray(imported.events) ? imported.events : [],
-        requests: Array.isArray(imported.requests) ? imported.requests : [],
+        requests: Array.isArray(imported.requests)
+            ? imported.requests.map(normalizeRequestRow)
+            : [],
         chats: Array.isArray(imported.chats) ? imported.chats : [],
     };
 }
@@ -675,14 +738,247 @@ function totalVolunteerHoursForDisplay(userRow, events) {
     return Math.max(fromEvents, stored);
 }
 
+function normalizeRequestStatus(status) {
+    const value = String(status || "").trim().toLowerCase();
+    if (
+        value === REQUEST_STATUS_PENDING ||
+        value === REQUEST_STATUS_APPROVED ||
+        value === REQUEST_STATUS_WAITLISTED ||
+        value === REQUEST_STATUS_COMPLETED ||
+        value === REQUEST_STATUS_WITHDRAWN
+    ) {
+        return value;
+    }
+    return REQUEST_STATUS_PENDING;
+}
+
+function normalizeRequestRow(request) {
+    const row = { ...request };
+    row.status = normalizeRequestStatus(row.status);
+    return row;
+}
+
+function isSeatOccupyingRequest(request) {
+    const status = normalizeRequestStatus(request?.status);
+    return status === REQUEST_STATUS_APPROVED || status === REQUEST_STATUS_COMPLETED;
+}
+
+function canWithdrawRequest(request) {
+    const status = normalizeRequestStatus(request?.status);
+    return (
+        status === REQUEST_STATUS_PENDING ||
+        status === REQUEST_STATUS_APPROVED ||
+        status === REQUEST_STATUS_WAITLISTED ||
+        status === REQUEST_STATUS_COMPLETED
+    );
+}
+
+function canRequestAccessChat(request) {
+    const status = normalizeRequestStatus(request?.status);
+    return status === REQUEST_STATUS_APPROVED || status === REQUEST_STATUS_COMPLETED;
+}
+
+function getRequestStatusMeta(status) {
+    const normalized = normalizeRequestStatus(status);
+    if (normalized === REQUEST_STATUS_APPROVED) {
+        return { text: "مقبولة", className: "approved" };
+    }
+    if (normalized === REQUEST_STATUS_WAITLISTED) {
+        return { text: "احتياط", className: "waitlisted" };
+    }
+    if (normalized === REQUEST_STATUS_COMPLETED) {
+        return { text: "مكتملة", className: "completed" };
+    }
+    if (normalized === REQUEST_STATUS_WITHDRAWN) {
+        return { text: "منسحبة", className: "withdrawn" };
+    }
+    return { text: "قيد المراجعة", className: "pending" };
+}
+
+function getRequestSortTimestamp(request) {
+    return new Date(
+        request.approvedAt ||
+            request.createdAt ||
+            request.completedAt ||
+            request.withdrawnAt ||
+            0
+    ).getTime();
+}
+
+function getEventRequestStats(requests, eventId) {
+    return (requests || []).reduce(
+        (stats, request) => {
+            if (request.eventId !== eventId) return stats;
+            stats.totalCount += 1;
+            const status = normalizeRequestStatus(request.status);
+            if (status === REQUEST_STATUS_PENDING) stats.pendingCount += 1;
+            if (status === REQUEST_STATUS_WAITLISTED) stats.waitlistCount += 1;
+            if (status === REQUEST_STATUS_WITHDRAWN) stats.withdrawnCount += 1;
+            if (status === REQUEST_STATUS_COMPLETED) stats.completedCount += 1;
+            if (isSeatOccupyingRequest(request)) stats.activeCount += 1;
+            return stats;
+        },
+        {
+            totalCount: 0,
+            activeCount: 0,
+            pendingCount: 0,
+            waitlistCount: 0,
+            withdrawnCount: 0,
+            completedCount: 0,
+        }
+    );
+}
+
+function getEventMemberGroups(users, requests, eventId) {
+    const userMap = new Map(
+        (users || []).map((user) => [user.uid, normalizeUserRow(user)])
+    );
+
+    const currentMembers = [];
+    const departedMembers = [];
+
+    for (const request of requests || []) {
+        if (request.eventId !== eventId) continue;
+        const user = userMap.get(request.userId);
+        if (!user || user.role === "admin") continue;
+
+        const member = {
+            uid: user.uid,
+            name: user.name || "-",
+            status: normalizeRequestStatus(request.status),
+            avatarInitial: getUserInitial(user.name),
+            dateLabel: isSeatOccupyingRequest(request)
+                ? formatMemberTimelineLabel(
+                    request.promotedAt || request.approvedAt || request.completedAt,
+                    "انضمت"
+                )
+                : formatMemberTimelineLabel(request.withdrawnAt, "غادرت"),
+        };
+
+        if (isSeatOccupyingRequest(request)) {
+            currentMembers.push(member);
+        } else if (member.status === REQUEST_STATUS_WITHDRAWN) {
+            departedMembers.push(member);
+        }
+    }
+
+    const byName = (left, right) =>
+        String(left.name || "").localeCompare(String(right.name || ""), "ar");
+
+    currentMembers.sort(byName);
+    departedMembers.sort(byName);
+
+    return { currentMembers, departedMembers };
+}
+
+function getUserInitial(name) {
+    const value = String(name || "").trim();
+    return value ? value.charAt(0).toUpperCase() : "؟";
+}
+
+function formatMemberTimelineLabel(iso, prefix) {
+    if (!iso) return "";
+    try {
+        const date = new Date(iso);
+        if (Number.isNaN(date.getTime())) return "";
+        return `${prefix} ${date.toLocaleDateString("ar-SA", {
+            year: "numeric",
+            month: "short",
+            day: "numeric",
+        })}`;
+    } catch {
+        return "";
+    }
+}
+
+function resolveAdmissionStatusForEvent(requests, eventRecord, requestIdToIgnore = "") {
+    const maxParticipants = parseInt(eventRecord?.maxParticipants, 10) || 0;
+    if (maxParticipants === 0) return REQUEST_STATUS_APPROVED;
+
+    const activeCount = (requests || []).filter(
+        (request) =>
+            request.eventId === eventRecord.id &&
+            request.id !== requestIdToIgnore &&
+            isSeatOccupyingRequest(request)
+    ).length;
+
+    return activeCount < maxParticipants
+        ? REQUEST_STATUS_APPROVED
+        : REQUEST_STATUS_WAITLISTED;
+}
+
+function promoteWaitlistedRequests(requests, eventRecord) {
+    if (!eventRecord) return [];
+
+    const maxParticipants = parseInt(eventRecord.maxParticipants, 10) || 0;
+    const waitlistedRequests = (requests || [])
+        .filter(
+            (request) =>
+                request.eventId === eventRecord.id &&
+                normalizeRequestStatus(request.status) === REQUEST_STATUS_WAITLISTED
+        )
+        .sort((left, right) => getRequestSortTimestamp(left) - getRequestSortTimestamp(right));
+
+    if (!waitlistedRequests.length) return [];
+
+    let availableSeats = maxParticipants === 0
+        ? waitlistedRequests.length
+        : maxParticipants - (requests || []).filter(
+            (request) =>
+                request.eventId === eventRecord.id &&
+                isSeatOccupyingRequest(request)
+        ).length;
+
+    if (availableSeats <= 0) return [];
+
+    const promoted = [];
+    for (const request of waitlistedRequests) {
+        if (availableSeats <= 0) break;
+        request.status = REQUEST_STATUS_APPROVED;
+        request.promotedAt = new Date().toISOString();
+        promoted.push(request);
+        availableSeats -= 1;
+    }
+
+    return promoted;
+}
+
+function addVolunteerHoursToUser(user, eventRecord) {
+    if (!user || !eventRecord) return;
+    const hours = Math.max(1, parseInt(eventRecord.volunteerHours, 10) || 4);
+    user.hours = (parseInt(user.hours, 10) || 0) + hours;
+    normalizeUserRow(user);
+    if (!user.volunteerEventIds.includes(eventRecord.id)) {
+        user.volunteerEventIds.push(eventRecord.id);
+    }
+}
+
+function removeVolunteerHoursFromUser(user, eventRecord) {
+    if (!user || !eventRecord) return;
+    const hours = Math.max(1, parseInt(eventRecord.volunteerHours, 10) || 4);
+    user.hours = Math.max(0, (parseInt(user.hours, 10) || 0) - hours);
+    normalizeUserRow(user);
+    user.volunteerEventIds = user.volunteerEventIds.filter(
+        (eventId) => eventId !== eventRecord.id
+    );
+}
+
 function getCompletedRequestCountForUser(userId, requests) {
     return (requests || []).filter(
-        (request) => request.userId === userId && request.status === "completed"
+        (request) =>
+            request.userId === userId &&
+            normalizeRequestStatus(request.status) === REQUEST_STATUS_COMPLETED
     ).length;
 }
 
 function getVolunteerHoursForRequest(request, eventRecord) {
-    if (!request || !eventRecord || request.status !== "completed") return 0;
+    if (
+        !request ||
+        !eventRecord ||
+        normalizeRequestStatus(request.status) !== REQUEST_STATUS_COMPLETED
+    ) {
+        return 0;
+    }
     return Math.max(1, parseInt(eventRecord.volunteerHours, 10) || 4);
 }
 
@@ -745,7 +1041,7 @@ function renderAdminUsersSection(users, events, requests, adminCollege) {
         0
     );
     const totalCompletedEvents = scopedRequests.filter(
-        (request) => request.status === "completed"
+        (request) => normalizeRequestStatus(request.status) === REQUEST_STATUS_COMPLETED
     ).length;
 
     summaryEl.innerHTML = `
@@ -784,9 +1080,9 @@ function renderAdminUsersSection(users, events, requests, adminCollege) {
                 })
                 .map(({ request, event, earnedHours }) => {
                     const statusText =
-                        request.status === "completed" ? "مكتملة" : "قيد المراجعة";
+                        getRequestStatusMeta(request.status).text;
                     const statusClass =
-                        request.status === "completed"
+                        normalizeRequestStatus(request.status) === REQUEST_STATUS_COMPLETED
                             ? "admin-event-chip--completed"
                             : "admin-event-chip--pending";
                     return `
@@ -843,7 +1139,9 @@ async function loadDb() {
     return {
         users: users.map(normalizeUserRow),
         events: Array.isArray(events) ? events : [],
-        requests: Array.isArray(requests) ? requests : [],
+        requests: Array.isArray(requests)
+            ? requests.map(normalizeRequestRow)
+            : [],
         chats: Array.isArray(chats) ? chats : [],
     };
 }
@@ -941,7 +1239,7 @@ function canUserAccessEventChat(user, eventRecord, requestRecord) {
     if (user.role === "admin") {
         return canAdminAccessCollege(eventRecord.college);
     }
-    return requestRecord?.status === "completed";
+    return canRequestAccessChat(requestRecord);
 }
 
 function canAdminAccessCollege(college) {
@@ -1410,6 +1708,7 @@ async function handleRegister() {
 function startApp() {
     // حفظ الجلسة في localStorage
     localStorage.setItem("athar_user_session", JSON.stringify(userData));
+    restoreEventMembersExpandedState();
 
     document.getElementById("login-wrapper").style.display = "none";
     document.getElementById("about-modal").style.display = "flex";
@@ -1492,7 +1791,7 @@ async function refreshEventsListUI() {
     const fab = document.getElementById("fab-add-event");
     if (!list) return;
 
-    const { events, requests } = await loadDb();
+    const { events, requests, users } = await loadDb();
     const targetCollege = normalizeCollegeName(currentCollegeForEvents);
     const collegeEvents = events.filter(
         (ev) => normalizeCollegeName(ev.college) === targetCollege
@@ -1515,7 +1814,7 @@ async function refreshEventsListUI() {
         return;
     }
 
-    const userRequests = requests.filter(r => r.userId === userData?.uid);
+    const userRequests = requests.filter((request) => request.userId === userData?.uid);
     const registeredEventIds = new Set(userRequests.map(r => r.eventId));
 
     list.innerHTML = collegeEvents
@@ -1527,24 +1826,82 @@ async function refreshEventsListUI() {
             const desc = escapeHtml(ev.description || "");
             const vh = Math.max(1, parseInt(ev.volunteerHours, 10) || 4);
             const maxPart = parseInt(ev.maxParticipants, 10) || 0;
-            const currentRequests = requests.filter(r => r.eventId === ev.id && r.status === "pending").length;
-            const totalRequests = requests.filter(r => r.eventId === ev.id).length;
+            const stats = getEventRequestStats(requests, ev.id);
 
             const isReg = registeredEventIds.has(ev.id);
-            const request = userRequests.find(r => r.eventId === ev.id);
-            const statusText = request ? (request.status === "completed" ? "مكتملة" : "قيد المراجعة") : "";
-                        const canOpenChat = canUserAccessEventChat(userData, ev, request);
+            const request = userRequests.find((item) => item.eventId === ev.id);
+            const requestMeta = request ? getRequestStatusMeta(request.status) : null;
+            const requestStatus = normalizeRequestStatus(request?.status);
+            const canOpenChat = canUserAccessEventChat(userData, ev, request);
+            const canViewMembers = Boolean(
+                canManageCollege ||
+                canRequestAccessChat(request)
+            );
+            const memberGroups = canViewMembers
+                ? getEventMemberGroups(users, requests, ev.id)
+                : { currentMembers: [], departedMembers: [] };
+            const currentMembersHtml = memberGroups.currentMembers.length
+                ? memberGroups.currentMembers
+                    .map((member) => `
+                        <li class="event-member-item">
+                            <span class="event-member-avatar">${escapeHtml(member.avatarInitial)}</span>
+                            <span class="event-member-content">
+                                <strong>${escapeHtml(member.name)}</strong>
+                                ${member.dateLabel ? `<small>${escapeHtml(member.dateLabel)}</small>` : ""}
+                            </span>
+                        </li>
+                    `)
+                    .join("")
+                : '<li class="event-members-list__empty">لا توجد عضوات حاليات بعد.</li>';
+            const departedMembersHtml = memberGroups.departedMembers.length
+                ? memberGroups.departedMembers
+                    .map((member) => `
+                        <li class="event-member-item">
+                            <span class="event-member-avatar event-member-avatar--departed">${escapeHtml(member.avatarInitial)}</span>
+                            <span class="event-member-content">
+                                <strong>${escapeHtml(member.name)}</strong>
+                                ${member.dateLabel ? `<small>${escapeHtml(member.dateLabel)}</small>` : ""}
+                            </span>
+                        </li>
+                    `)
+                    .join("")
+                : '<li class="event-members-list__empty">لا توجد حالات مغادرة حتى الآن.</li>';
+            const membersPanelExpanded = isEventMembersPanelExpanded(
+                ev.id,
+                canManageCollege
+            );
+            const membersSection = canViewMembers
+                ? `
+                    <details class="event-members-panel" data-members-event-id="${escapeHtml(ev.id)}" ontoggle="handleEventMembersToggle(event, '${escapeAttr(ev.id)}')" ${membersPanelExpanded ? "open" : ""}>
+                        <summary class="event-members-panel__summary">
+                            <span class="event-members-panel__header">
+                                <span><i class="fas fa-users"></i> أعضاء الفعالية</span>
+                            </span>
+                            <span class="event-members-panel__meta">${memberGroups.currentMembers.length} حاليات • ${memberGroups.departedMembers.length} غادرن</span>
+                        </summary>
+                        <div class="event-members-groups">
+                            <div class="event-members-group">
+                                <h5>الأعضاء الحاليون (${memberGroups.currentMembers.length})</h5>
+                                <ul class="event-members-list">${currentMembersHtml}</ul>
+                            </div>
+                            <div class="event-members-group event-members-group--departed">
+                                <h5>الأعضاء الذين غادروا (${memberGroups.departedMembers.length})</h5>
+                                <ul class="event-members-list event-members-list--departed">${departedMembersHtml}</ul>
+                            </div>
+                        </div>
+                    </details>
+                `
+                : "";
 
-                        const regNote = isReg
-                                ? `<span class="hours-tag hours-tag--status">${statusText}</span>`
-                                : canRegister && currentRequests < maxPart
-                                    ? '<span class="event-tap-hint">يمكنكِ الإرسال من الزر أو من البطاقة</span>'
-                                    : maxPart > 0 && currentRequests >= maxPart
-                                        ? '<span class="event-tap-hint" style="color: #dc3545;">الفعالية مكتملة العدد</span>'
-                                        : "";
+            const regNote = isReg
+                ? `<span class="hours-tag hours-tag--status hours-tag--${requestMeta.className}">${requestMeta.text}</span>`
+                : canRegister
+                    ? maxPart > 0 && stats.activeCount >= maxPart
+                        ? '<span class="event-tap-hint" style="color: #9c6b00;">العدد مكتمل حالياً، ويمكن وضعك في قائمة الاحتياط بعد قبول الإدارة</span>'
+                        : '<span class="event-tap-hint">يمكنكِ الإرسال من الزر أو من البطاقة</span>'
+                    : "";
 
-            const canRegClass =
-                canRegister && !isReg && (maxPart === 0 || currentRequests < maxPart) ? "event-card--can-register" : "";
+            const canRegClass = canRegister && !isReg ? "event-card--can-register" : "";
 
             const delBtn = canManageCollege
                 ? `<button type="button" class="btn-delete-event" data-delete-id="${escapeHtml(ev.id)}" aria-label="حذف الفعالية" onclick="event.stopPropagation(); deleteCollegeEvent('${escapeAttr(ev.id)}');"><i class="fas fa-trash-alt"></i></button>`
@@ -1552,10 +1909,14 @@ async function refreshEventsListUI() {
 
             const chatBtn = canOpenChat
                 ? `<button type="button" class="btn-chat btn-chat--event" data-chat-event-id="${escapeHtml(ev.id)}" onclick="event.stopPropagation(); openChat('${escapeAttr(ev.id)}').catch(console.error);"><i class="fas fa-comments"></i> شات الفعالية</button>`
-                : `<button type="button" class="btn-chat btn-chat--event btn-chat--disabled" disabled>${request?.status === "pending" ? "متاح بعد اعتماد الانضمام" : "الشات للمشاركات فقط"}</button>`;
+                : `<button type="button" class="btn-chat btn-chat--event btn-chat--disabled" disabled>${requestStatus === REQUEST_STATUS_PENDING ? "متاح بعد قبول الإدارة" : requestStatus === REQUEST_STATUS_WAITLISTED ? "متاح بعد دخولك ضمن المقاعد" : "الشات للمشاركات فقط"}</button>`;
 
-            const joinBtn = canRegister && !isReg && (maxPart === 0 || currentRequests < maxPart)
+            const joinBtn = canRegister && !isReg
                 ? `<button type="button" class="btn-join-event" data-join-event-id="${escapeHtml(ev.id)}"><i class="fas fa-paper-plane"></i> إرسال طلب الانضمام</button>`
+                : "";
+
+            const withdrawBtn = canRegister && canWithdrawRequest(request)
+                ? `<button type="button" class="btn-reject btn-withdraw-event" data-withdraw-event-id="${escapeHtml(ev.id)}"><i class="fas fa-right-from-bracket"></i> انسحاب</button>`
                 : "";
 
             return `
@@ -1566,12 +1927,16 @@ async function refreshEventsListUI() {
                     <p><i class="far fa-clock"></i> <b>الوقت:</b> ${timeStr}</p>
                     <p><i class="fas fa-map-marker-alt"></i> <b>المكان:</b> ${loc}</p>
                     ${desc ? `<p><i class="fas fa-info-circle"></i> <b>الوصف:</b> ${desc}</p>` : ""}
-                    ${maxPart > 0 ? `<p><i class="fas fa-users"></i> <b>المشاركون:</b> ${totalRequests}/${maxPart}</p>` : (totalRequests > 0 ? `<p><i class="fas fa-users"></i> <b>الطلبات:</b> ${totalRequests}</p>` : "")}
+                    ${maxPart > 0 ? `<p><i class="fas fa-users"></i> <b>المقبولات:</b> ${stats.activeCount}/${maxPart}</p>` : (stats.totalCount > 0 ? `<p><i class="fas fa-users"></i> <b>إجمالي الطلبات:</b> ${stats.totalCount}</p>` : "")}
+                    ${stats.waitlistCount > 0 ? `<p><i class="fas fa-user-clock"></i> <b>قائمة الاحتياط:</b> ${stats.waitlistCount}</p>` : ""}
+                    ${stats.withdrawnCount > 0 ? `<p><i class="fas fa-user-minus"></i> <b>المنسحبات:</b> ${stats.withdrawnCount}</p>` : ""}
+                    ${membersSection}
                 </div>
                 <div class="event-card-actions">
                     <span class="hours-tag">+${vh} ساعات مكتسبة</span>
                     ${regNote}
                     ${joinBtn}
+                    ${withdrawBtn}
                     ${chatBtn}
                     ${delBtn}
                 </div>
@@ -1616,20 +1981,13 @@ async function sendJoinRequest(eventId) {
         return;
     }
 
-    const maxPart = parseInt(event.maxParticipants, 10) || 0;
-    const currentRequests = db.requests.filter(r => r.eventId === eventId && r.status === "pending").length;
-    if (maxPart > 0 && currentRequests >= maxPart) {
-        showNotification("الفعالية مكتملة العدد.");
-        return;
-    }
-
     showLoader(true);
     try {
         const request = {
             id: newUid(),
             userId: userData.uid,
             eventId: eventId,
-            status: "pending",
+            status: REQUEST_STATUS_PENDING,
             createdAt: new Date().toISOString(),
         };
         db.requests.push(request);
@@ -1640,6 +1998,51 @@ async function sendJoinRequest(eventId) {
     } catch (err) {
         console.error(err);
         showNotification("تعذّر إرسال طلب الانضمام.");
+    } finally {
+        showLoader(false);
+    }
+}
+
+async function withdrawEventRequest(eventId) {
+    if (!userData || userData.role === "admin") return;
+
+    showLoader(true);
+    try {
+        const db = await loadDb();
+        const request = db.requests.find(
+            (item) => item.userId === userData.uid && item.eventId === eventId
+        );
+        if (!request) {
+            showNotification("لا يوجد طلب مرتبط بهذه الفعالية.");
+            return;
+        }
+
+        if (!canWithdrawRequest(request)) {
+            showNotification("لا يمكن تنفيذ الانسحاب لهذا الطلب حالياً.");
+            return;
+        }
+
+        const eventRecord = db.events.find((eventItem) => eventItem.id === eventId);
+        const previousStatus = normalizeRequestStatus(request.status);
+        const user = db.users.find((item) => item.uid === userData.uid);
+        request.status = REQUEST_STATUS_WITHDRAWN;
+        request.withdrawnAt = new Date().toISOString();
+
+        if (previousStatus === REQUEST_STATUS_COMPLETED && user && eventRecord) {
+            removeVolunteerHoursFromUser(user, eventRecord);
+            await saveDb(db);
+        }
+
+        if (isSeatOccupyingRequest({ status: previousStatus }) && eventRecord) {
+            promoteWaitlistedRequests(db.requests, eventRecord);
+        }
+
+        await saveRequests(db.requests);
+        showNotification("تم تسجيل انسحابك من الفعالية.");
+        await refreshEventsListUI();
+    } catch (err) {
+        console.error(err);
+        showNotification("تعذّر تنفيذ الانسحاب من الفعالية.");
     } finally {
         showLoader(false);
     }
@@ -1772,7 +2175,11 @@ async function openVolunteerLogModal() {
     ul.innerHTML = "";
 
     const db = await loadDb();
-    const completedRequests = db.requests.filter(r => r.userId === userData.uid && r.status === "completed");
+    const completedRequests = db.requests.filter(
+        (request) =>
+            request.userId === userData.uid &&
+            normalizeRequestStatus(request.status) === REQUEST_STATUS_COMPLETED
+    );
     const eventMap = new Map(db.events.map((ev) => [ev.id, ev]));
 
     if (!completedRequests.length) {
@@ -1970,6 +2377,7 @@ function renderAdminPage() {
 
         list.innerHTML = scopedEvents.map(ev => {
             const eventRequests = requestMap.get(ev.id) || [];
+            const stats = getEventRequestStats(eventRequests, ev.id);
             const eventChats = (chatMap.get(ev.id) || []).sort(
                 (a, b) => new Date(a.timestamp) - new Date(b.timestamp)
             );
@@ -1980,27 +2388,68 @@ function renderAdminPage() {
             const lastChatPreview = lastChat
                 ? escapeHtml(lastChat.message || "")
                 : "لا توجد رسائل بعد";
-            const requestsHtml = eventRequests.map(r => {
+            const buildRequestCard = (r) => {
                 const user = userMap.get(r.userId);
                 if (!user) return '';
                 const name = escapeHtml(user.name);
                 const email = escapeHtml(user.email);
-                const statusClass = r.status === 'completed' ? 'completed' : 'pending';
-                const statusText = r.status === 'completed' ? 'مكتملة' : 'قيد المراجعة';
+                const statusMeta = getRequestStatusMeta(r.status);
+                const status = normalizeRequestStatus(r.status);
+                const metaLine = status === REQUEST_STATUS_WITHDRAWN && r.withdrawnAt
+                    ? `<div class="request-meta-line">انسحبت في ${escapeHtml(new Date(r.withdrawnAt).toLocaleString('ar-SA'))}</div>`
+                    : status === REQUEST_STATUS_WAITLISTED
+                        ? '<div class="request-meta-line">بانتظار توفر مقعد بسبب اكتمال العدد.</div>'
+                        : status === REQUEST_STATUS_APPROVED
+                            ? '<div class="request-meta-line">ضمن العضوات المعتمدات داخل العدد.</div>'
+                            : status === REQUEST_STATUS_COMPLETED
+                                ? '<div class="request-meta-line">تم اعتماد الساعات لهذه الطالبة.</div>'
+                                : '<div class="request-meta-line">بانتظار قرار الإدارة.</div>';
+
+                const actions = [];
+                if (status === REQUEST_STATUS_PENDING) {
+                    actions.push(`<button class="btn-approve" onclick="approveRequest('${r.id}')">قبول</button>`);
+                }
+                if (status === REQUEST_STATUS_APPROVED) {
+                    actions.push(`<button class="btn-approve" onclick="completeRequest('${r.id}')">إنجاز الساعات</button>`);
+                }
+                if (status === REQUEST_STATUS_COMPLETED) {
+                    actions.push(`<button class="btn-reject" onclick="rejectRequest('${r.id}')">تراجع عن الإنجاز</button>`);
+                }
+
                 return `
                     <div class="admin-request-item">
                         <div class="request-info">
                             <div class="request-name">${name}</div>
                             <div class="request-email">${email}</div>
+                            ${metaLine}
                         </div>
-                        <div class="request-status ${statusClass}">${statusText}</div>
+                        <div class="request-status ${statusMeta.className}">${statusMeta.text}</div>
                         <div class="request-actions">
-                            ${r.status !== 'completed' ? `<button class="btn-approve" onclick="approveRequest('${r.id}')">أنجزت الساعات</button>` : ''}
-                            ${r.status === 'completed' ? `<button class="btn-reject" onclick="rejectRequest('${r.id}')">تراجع</button>` : ''}
+                            ${actions.join('')}
                         </div>
                     </div>
                 `;
-            }).join('');
+            };
+
+            const activeRequests = eventRequests
+                .filter((request) => isSeatOccupyingRequest(request))
+                .sort((left, right) => getRequestSortTimestamp(left) - getRequestSortTimestamp(right));
+            const waitlistedRequests = eventRequests
+                .filter((request) => normalizeRequestStatus(request.status) === REQUEST_STATUS_WAITLISTED)
+                .sort((left, right) => getRequestSortTimestamp(left) - getRequestSortTimestamp(right));
+            const pendingRequests = eventRequests
+                .filter((request) => normalizeRequestStatus(request.status) === REQUEST_STATUS_PENDING)
+                .sort((left, right) => getRequestSortTimestamp(left) - getRequestSortTimestamp(right));
+            const withdrawnRequests = eventRequests
+                .filter((request) => normalizeRequestStatus(request.status) === REQUEST_STATUS_WITHDRAWN)
+                .sort((left, right) => getRequestSortTimestamp(right) - getRequestSortTimestamp(left));
+
+            const renderGroup = (title, items, emptyText) => `
+                <div class="admin-request-group">
+                    <h5 class="admin-request-group__title">${title}</h5>
+                    ${items.length ? items.map(buildRequestCard).join('') : `<p class="admin-request-group__empty">${emptyText}</p>`}
+                </div>
+            `;
 
             return `
                 <div class="admin-event-card">
@@ -2016,13 +2465,19 @@ function renderAdminPage() {
                         <p><strong>الوقت:</strong> ${ev.timeStart || ''} - ${ev.timeEnd || ''}</p>
                         <p><strong>المكان:</strong> ${escapeHtml(ev.location || '')}</p>
                         <p><strong>الساعات:</strong> ${ev.volunteerHours || 4}</p>
+                        <p><strong>المقبولات داخل العدد:</strong> ${stats.activeCount}${ev.maxParticipants ? ` / ${ev.maxParticipants}` : ''}</p>
+                        <p><strong>قائمة الاحتياط:</strong> ${stats.waitlistCount}</p>
+                        <p><strong>المنسحبات:</strong> ${stats.withdrawnCount}</p>
                         <p><strong>عدد الرسائل:</strong> ${eventChats.length}</p>
                         <p><strong>آخر رسالة:</strong> ${lastChat ? `${lastChatSender}: ${lastChatPreview}` : lastChatPreview}</p>
                         ${ev.maxParticipants ? `<p><strong>الحد الأقصى:</strong> ${ev.maxParticipants}</p>` : ''}
                     </div>
                     <div class="admin-requests-list">
-                        <h4>طلبات الانضمام (${eventRequests.length}):</h4>
-                        ${requestsHtml || '<p style="color: #666;">لا توجد طلبات بعد.</p>'}
+                        <h4>إدارة العضوات والطلبات (${eventRequests.length})</h4>
+                        ${renderGroup('العضوات الموجودات داخل الفعالية', activeRequests, 'لا توجد عضوات معتمدات داخل هذه الفعالية بعد.')}
+                        ${renderGroup('قائمة الاحتياط', waitlistedRequests, 'لا توجد عضوات في قائمة الاحتياط.')}
+                        ${renderGroup('طلبات قيد المراجعة', pendingRequests, 'لا توجد طلبات قيد المراجعة.')}
+                        ${renderGroup('المنسحبات', withdrawnRequests, 'لا توجد حالات انسحاب حتى الآن.')}
                     </div>
                 </div>
             `;
@@ -2062,8 +2517,8 @@ async function approveRequest(requestId) {
     try {
         const db = await loadDb();
         const request = db.requests.find(r => r.id === requestId);
-        if (!request || request.status === "completed") {
-            showNotification("الطلب غير موجود أو مكتمل مسبقاً.");
+        if (!request || normalizeRequestStatus(request.status) !== REQUEST_STATUS_PENDING) {
+            showNotification("الطلب غير موجود أو لم يعد بانتظار القبول.");
             return;
         }
 
@@ -2073,28 +2528,56 @@ async function approveRequest(requestId) {
             return;
         }
 
-        request.status = "completed";
-
-        // إضافة الساعات للمستخدم
-        const user = db.users.find(u => u.uid === request.userId);
-        if (user) {
-            if (event) {
-                const hours = parseInt(event.volunteerHours, 10) || 4;
-                user.hours = (parseInt(user.hours, 10) || 0) + hours;
-                normalizeUserRow(user);
-                if (!user.volunteerEventIds.includes(request.eventId)) {
-                    user.volunteerEventIds.push(request.eventId);
-                }
-                await saveDb(db);
-            }
-        }
+        request.status = resolveAdmissionStatusForEvent(db.requests, event, request.id);
+        request.approvedAt = new Date().toISOString();
 
         await saveRequests(db.requests);
-        showNotification("تم قبول الطلب وإضافة الساعات.");
+        showNotification(
+            request.status === REQUEST_STATUS_WAITLISTED
+                ? "تم قبول الطلب وإضافته إلى قائمة الاحتياط بسبب اكتمال العدد."
+                : "تم قبول الطلب وإدخال الطالبة ضمن المشاركات."
+        );
         renderAdminPage();
     } catch (err) {
         console.error(err);
         showNotification("تعذّر قبول الطلب.");
+    } finally {
+        showLoader(false);
+    }
+}
+
+async function completeRequest(requestId) {
+    if (!userData || userData.role !== "admin") return;
+
+    showLoader(true);
+    try {
+        const db = await loadDb();
+        const request = db.requests.find((item) => item.id === requestId);
+        if (!request || normalizeRequestStatus(request.status) !== REQUEST_STATUS_APPROVED) {
+            showNotification("يمكن اعتماد الساعات فقط للطلبات المقبولة داخل العدد.");
+            return;
+        }
+
+        const event = db.events.find((item) => item.id === request.eventId);
+        if (!event || !canAdminAccessCollege(event.college)) {
+            showNotification("لا تملكين صلاحية تعديل هذا الطلب.");
+            return;
+        }
+
+        const user = db.users.find((item) => item.uid === request.userId);
+        if (user) {
+            addVolunteerHoursToUser(user, event);
+            await saveDb(db);
+        }
+
+        request.status = REQUEST_STATUS_COMPLETED;
+        request.completedAt = new Date().toISOString();
+        await saveRequests(db.requests);
+        showNotification("تم اعتماد الساعات للطالبة.");
+        renderAdminPage();
+    } catch (err) {
+        console.error(err);
+        showNotification("تعذّر اعتماد الساعات.");
     } finally {
         showLoader(false);
     }
@@ -2107,7 +2590,7 @@ async function rejectRequest(requestId) {
     try {
         const db = await loadDb();
         const request = db.requests.find(r => r.id === requestId);
-        if (!request || request.status !== "completed") {
+        if (!request || normalizeRequestStatus(request.status) !== REQUEST_STATUS_COMPLETED) {
             showNotification("الطلب غير موجود أو غير مكتمل.");
             return;
         }
@@ -2118,22 +2601,20 @@ async function rejectRequest(requestId) {
             return;
         }
 
-        request.status = "pending";
+        request.status = resolveAdmissionStatusForEvent(db.requests, event, request.id);
 
-        // إزالة الساعات من المستخدم
         const user = db.users.find(u => u.uid === request.userId);
         if (user) {
-            if (event) {
-                const hours = parseInt(event.volunteerHours, 10) || 4;
-                user.hours = Math.max(0, (parseInt(user.hours, 10) || 0) - hours);
-                normalizeUserRow(user);
-                user.volunteerEventIds = user.volunteerEventIds.filter(id => id !== request.eventId);
-                await saveDb(db);
-            }
+            removeVolunteerHoursFromUser(user, event);
+            await saveDb(db);
         }
 
         await saveRequests(db.requests);
-        showNotification("تم تراجع الطلب وإزالة الساعات.");
+        showNotification(
+            request.status === REQUEST_STATUS_WAITLISTED
+                ? "تم التراجع عن الإنجاز وإعادة الطالبة إلى قائمة الاحتياط."
+                : "تم التراجع عن الإنجاز وإزالة الساعات."
+        );
         renderAdminPage();
     } catch (err) {
         console.error(err);
@@ -2162,10 +2643,13 @@ function closeAbout() {
 
 function logout() {
     // تنظيف البيانات
+    const eventMembersStorageKey = getEventMembersExpandedStorageKey();
     userData = null;
     clearHoursSubscription();
     clearAdminSubscription();
+    eventMembersExpandedState = new Map();
     localStorage.removeItem("athar_user_session");
+    localStorage.removeItem(eventMembersStorageKey);
 
     // إعادة عرض الـ login
     document.getElementById("login-wrapper").style.display = "flex";
@@ -2381,6 +2865,11 @@ window.addEventListener("athar-db-changed", () => {
 window.addEventListener("hashchange", applyRouteFromHash);
 
 function handleEventsListClick(e) {
+    const memberPanel = e.target.closest(".event-members-panel");
+    if (memberPanel) {
+        e.stopPropagation();
+        return;
+    }
     const delBtn = e.target.closest(".btn-delete-event");
     if (delBtn) {
         e.preventDefault();
@@ -2407,6 +2896,16 @@ function handleEventsListClick(e) {
         const id = joinBtn.getAttribute("data-join-event-id");
         if (id) {
             sendJoinRequest(id).catch(console.error);
+        }
+        return;
+    }
+    const withdrawBtn = e.target.closest(".btn-withdraw-event[data-withdraw-event-id]");
+    if (withdrawBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        const id = withdrawBtn.getAttribute("data-withdraw-event-id");
+        if (id) {
+            withdrawEventRequest(id).catch(console.error);
         }
         return;
     }
@@ -2499,6 +2998,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     localStorage.removeItem("athar_user_session");
                 } else {
                     userData = toPublicUser(parsed);
+                    restoreEventMembersExpandedState();
                     renderHomeColleges();
                     // إعادة تشغيل الاشتراكات إذا لزم الأمر
                     if (userData.role !== "admin") {
