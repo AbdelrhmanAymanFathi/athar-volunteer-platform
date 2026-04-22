@@ -139,13 +139,14 @@ function showLoader(v) {
     document.getElementById("loader").style.display = v ? "flex" : "none";
 }
 
-function getEventMembersExpandedStorageKey() {
-    return `${EVENT_MEMBERS_EXPANDED_STORAGE_KEY}:${userData?.uid || "guest"}`;
+function getEventMembersExpandedStorageKey(college = currentCollegeForEvents) {
+    const normalizedCollege = normalizeCollegeName(college) || "global";
+    return `${EVENT_MEMBERS_EXPANDED_STORAGE_KEY}:${userData?.uid || "guest"}:${normalizedCollege}`;
 }
 
-function restoreEventMembersExpandedState() {
+function restoreEventMembersExpandedState(college = currentCollegeForEvents) {
     try {
-        const raw = localStorage.getItem(getEventMembersExpandedStorageKey());
+        const raw = localStorage.getItem(getEventMembersExpandedStorageKey(college));
         if (!raw) {
             eventMembersExpandedState = new Map();
             return;
@@ -167,14 +168,30 @@ function restoreEventMembersExpandedState() {
     }
 }
 
-function persistEventMembersExpandedState() {
+function persistEventMembersExpandedState(college = currentCollegeForEvents) {
     try {
         localStorage.setItem(
-            getEventMembersExpandedStorageKey(),
+            getEventMembersExpandedStorageKey(college),
             JSON.stringify(Object.fromEntries(eventMembersExpandedState))
         );
     } catch (err) {
         console.warn("Athar: تعذر حفظ حالة طي الأعضاء", err);
+    }
+}
+
+function clearEventMembersExpandedStateStorageForUser() {
+    try {
+        const prefix = `${EVENT_MEMBERS_EXPANDED_STORAGE_KEY}:${userData?.uid || "guest"}:`;
+        const keysToRemove = [];
+        for (let index = 0; index < localStorage.length; index++) {
+            const key = localStorage.key(index);
+            if (key && key.startsWith(prefix)) {
+                keysToRemove.push(key);
+            }
+        }
+        keysToRemove.forEach((key) => localStorage.removeItem(key));
+    } catch (err) {
+        console.warn("Athar: تعذر تنظيف حالات طي الأعضاء", err);
     }
 }
 
@@ -1952,6 +1969,7 @@ function openEvents(college) {
         return;
     }
     currentCollegeForEvents = normalizedCollege;
+    restoreEventMembersExpandedState(normalizedCollege);
     const titleEl = document.getElementById("college-name-display");
     if (titleEl) titleEl.textContent = "فعاليات " + getCollegeDisplayName(normalizedCollege);
     goToPage("events-page");
@@ -2643,13 +2661,12 @@ function closeAbout() {
 
 function logout() {
     // تنظيف البيانات
-    const eventMembersStorageKey = getEventMembersExpandedStorageKey();
+    clearEventMembersExpandedStateStorageForUser();
     userData = null;
     clearHoursSubscription();
     clearAdminSubscription();
     eventMembersExpandedState = new Map();
     localStorage.removeItem("athar_user_session");
-    localStorage.removeItem(eventMembersStorageKey);
 
     // إعادة عرض الـ login
     document.getElementById("login-wrapper").style.display = "flex";
@@ -2787,6 +2804,7 @@ function applyRouteFromHash() {
             return;
         }
         currentCollegeForEvents = normalizedCollege;
+        restoreEventMembersExpandedState(normalizedCollege);
         const titleEl = document.getElementById("college-name-display");
         if (titleEl) titleEl.textContent = "فعاليات " + getCollegeDisplayName(normalizedCollege);
         applyPageView("events-page");
