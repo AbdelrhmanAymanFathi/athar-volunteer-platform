@@ -50,23 +50,7 @@
           </div>
           <div class="input-group">
             <label for="reg-phone">رقم الجوال</label>
-            <div class="phone-field">
-              <select id="reg-phone-country" class="phone-field__country" aria-label="مفتاح الدولة">
-                <option value="+966" selected>السعودية +966</option>
-                <option value="+20">مصر +20</option>
-                <option value="+971">الإمارات +971</option>
-                <option value="+965">الكويت +965</option>
-                <option value="+974">قطر +974</option>
-                <option value="+973">البحرين +973</option>
-                <option value="+968">عُمان +968</option>
-                <option value="+962">الأردن +962</option>
-                <option value="">إدخال دولي كامل</option>
-              </select>
-              <input type="tel" id="reg-phone" placeholder="05xxxxxxxx" autocomplete="tel" dir="ltr" />
-            </div>
-            <div class="register-hint register-hint--phone">
-              يمكنكِ اختيار الدولة ثم كتابة الرقم المحلي، أو إدخال الرقم كاملًا بصيغة دولية مثل +201234567890.
-            </div>
+            <input type="tel" id="reg-phone" placeholder="05xxxxxxxx" autocomplete="tel" />
           </div>
         </div>
         <div class="input-group">
@@ -94,25 +78,6 @@
             <span class="invalid"><i class="fas fa-circle password-hints__dot"></i> رمز خاص واحد على الأقل (!@#$...)</span>
           </div>
         </div>
-        <div id="otp-verification-panel" class="otp-verification-panel auth-register-only" hidden>
-          <h3 class="otp-verification-panel__title">تأكيد رقم الجوال</h3>
-          <p class="otp-verification-panel__hint" id="otp-status-text">
-            سنرسل رمز تحقق SMS إلى رقم الجوال الذي أدخلته.
-          </p>
-          <div class="input-group otp-verification-panel__field">
-            <label for="otp-code">رمز التحقق</label>
-            <input type="text" id="otp-code" placeholder="أدخلي رمز التحقق" inputmode="numeric" maxlength="6" dir="ltr" />
-          </div>
-          <div class="otp-verification-panel__actions">
-            <button type="button" class="btn-modal-secondary" id="otp-verify-btn" onclick="handleOtpVerification()">
-              تأكيد الرمز
-            </button>
-            <button type="button" class="btn-modal-secondary" id="otp-reset-btn" onclick="resetOtpFlow()">
-              تعديل الرقم
-            </button>
-          </div>
-        </div>
-        <div id="recaptcha-container" aria-hidden="true"></div>
         <button type="submit" class="btn-login" id="auth-submit-btn">
           تسجيل الدخول
         </button>
@@ -453,8 +418,6 @@
 
   </div>
 
-  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
   <script src="./main.js"></script>
 </body>
 
