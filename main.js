@@ -104,6 +104,22 @@ let dbJsonFileHandle = null;
 let dbJsonAutoSaveTimer = null;
 let dbJsonAutoSaveInFlight = false;
 let dbJsonAutoSaveQueued = false;
+let firebaseAppInstance = null;
+let firebasePhoneAuth = null;
+let firebaseRecaptchaVerifier = null;
+let firebaseConfirmationResult = null;
+let pendingRegistrationPayload = null;
+
+// 1) ضعي بيانات مشروع Firebase هنا قبل تجربة OTP على جهازك.
+const FIREBASE_CONFIG = {
+    apiKey: "AIzaSyDaiuEKnbGLpRO03u7ya66TyaOcBvnVR3w",
+    authDomain: "athar-6c851.firebaseapp.com",
+    projectId: "athar-6c851",
+    storageBucket: "athar-6c851.firebasestorage.app",
+    messagingSenderId: "634015253931",
+    appId: "1:634015253931:web:4a8da39913fe4142a57eee",
+    measurementId: "G-199H1D8DHH",
+};
 
 const DB_SYNC_TAB_ID =
     (typeof crypto !== "undefined" && crypto.randomUUID
@@ -215,6 +231,309 @@ function updateDbJsonStatus(message, isError = false) {
     if (!statusEl) return;
     statusEl.textContent = message;
     statusEl.style.color = isError ? "#c0392b" : "#607171";
+}
+
+function isFirebaseConfigReady() {
+    return Object.values(FIREBASE_CONFIG).every(
+        (value) => value && !String(value).startsWith("YOUR_FIREBASE_")
+    );
+}
+
+function getOtpPanelElements() {
+    return {
+        panel: document.getElementById("otp-verification-panel"),
+        input: document.getElementById("otp-code"),
+        statusText: document.getElementById("otp-status-text"),
+        verifyButton: document.getElementById("otp-verify-btn"),
+    };
+}
+
+function setButtonLoadingState(button, isLoading, idleText, loadingText) {
+    if (!button) return;
+    if (!button.dataset.idleText) {
+        button.dataset.idleText = idleText || button.textContent.trim();
+    }
+    button.disabled = Boolean(isLoading);
+    button.textContent = isLoading
+        ? loadingText || "جاري المعالجة..."
+        : button.dataset.idleText;
+}
+
+function setAuthSubmitLoading(isLoading, text = "جاري إرسال الرمز...") {
+    const submitButton = document.getElementById("auth-submit-btn");
+    setButtonLoadingState(submitButton, isLoading, "إنشاء الحساب", text);
+}
+
+function setOtpPanelVisible(isVisible, message = "") {
+    const { panel, input, statusText } = getOtpPanelElements();
+    if (!panel) return;
+
+    panel.hidden = !isVisible;
+    if (statusText && message) {
+        statusText.textContent = message;
+    }
+
+    if (isVisible && input) {
+        input.value = "";
+        input.focus();
+    }
+}
+
+function resetOtpFlow() {
+    firebaseConfirmationResult = null;
+    pendingRegistrationPayload = null;
+    setOtpPanelVisible(false);
+    const otpInput = document.getElementById("otp-code");
+    if (otpInput) otpInput.value = "";
+}
+
+function getSelectedPhoneCountryCode() {
+    const countrySelect = document.getElementById("reg-phone-country");
+    return countrySelect ? String(countrySelect.value || "").trim() : "";
+}
+
+function syncPhonePlaceholder() {
+    const phoneInput = document.getElementById("reg-phone");
+    if (!phoneInput) return;
+
+    const selectedCountryCode = getSelectedPhoneCountryCode();
+    if (!selectedCountryCode || selectedCountryCode === "+20") {
+        phoneInput.placeholder = selectedCountryCode === "+20"
+            ? "01xxxxxxxxx"
+            : "+201234567890";
+        return;
+    }
+    if (selectedCountryCode === "+966") {
+        phoneInput.placeholder = "05xxxxxxxx";
+        return;
+    }
+
+    phoneInput.placeholder = "رقم محلي بدون مفتاح الدولة";
+}
+
+function formatPhoneForFirebase(phone, selectedCountryCode = "") {
+    const rawValue = String(phone || "").trim();
+    const normalizedValue = rawValue.replace(/[\s()-]/g, "");
+    const digitsOnly = normalizedValue.replace(/\D/g, "");
+    const normalizedCountryCode = String(selectedCountryCode || "").trim();
+    const countryDigits = normalizedCountryCode.replace(/\D/g, "");
+
+    if (/^\+[1-9]\d{7,14}$/.test(normalizedValue)) {
+        return normalizedValue;
+    }
+
+    if (/^00[1-9]\d{7,14}$/.test(digitsOnly)) {
+        return `+${digitsOnly.slice(2)}`;
+    }
+
+    if (/^05\d{8}$/.test(digitsOnly)) {
+        return `+966${digitsOnly.slice(1)}`;
+    }
+    if (/^5\d{8}$/.test(digitsOnly)) {
+        return `+966${digitsOnly}`;
+    }
+    if (/^9665\d{8}$/.test(digitsOnly)) {
+        return `+${digitsOnly}`;
+    }
+
+    if (countryDigits) {
+        if (digitsOnly.startsWith(countryDigits) && /^[1-9]\d{7,14}$/.test(digitsOnly)) {
+            return `+${digitsOnly}`;
+        }
+
+        const localDigits = digitsOnly.replace(/^0+/, "");
+        const combinedDigits = `${countryDigits}${localDigits}`;
+        if (
+            /^[1-9]\d{5,14}$/.test(localDigits) &&
+            /^[1-9]\d{7,14}$/.test(combinedDigits) &&
+            combinedDigits.length <= 15
+        ) {
+            return `+${combinedDigits}`;
+        }
+    }
+
+    if (/^[1-9]\d{7,14}$/.test(digitsOnly)) {
+        return `+${digitsOnly}`;
+    }
+
+    return "";
+}
+
+function getFirebasePhoneAuthErrorMessage(error, phase = "send") {
+    const code = String(error?.code || "").toLowerCase();
+
+    if (phase === "verify") {
+        if (code === "auth/invalid-verification-code") {
+            return "رمز التحقق غير صحيح.";
+        }
+        if (code === "auth/code-expired" || code === "auth/session-expired") {
+            return "انتهت صلاحية رمز التحقق. أعيدي إرسال الرمز مرة أخرى.";
+        }
+        if (code === "auth/network-request-failed") {
+            return "تعذّر التحقق بسبب مشكلة في الاتصال بالإنترنت.";
+        }
+        return "تعذّر التحقق من الرمز. حاولي مرة أخرى.";
+    }
+
+    if (code === "auth/invalid-phone-number" || code === "auth/missing-phone-number") {
+        return "رقم الجوال غير صحيح. تحققي من مفتاح الدولة والرقم المحلي.";
+    }
+    if (code === "auth/invalid-api-key") {
+        return "إعداد Firebase غير صحيح: مفتاح API غير صالح أو عليه قيود تمنع Firebase Auth. راجعي Project Settings وقيود API Key في Google Cloud.";
+    }
+    if (code === "auth/too-many-requests") {
+        return "تمت محاولات كثيرة على هذا الرقم. انتظري قليلًا ثم حاولي مرة أخرى.";
+    }
+    if (code === "auth/quota-exceeded") {
+        return "تم استهلاك الحد المسموح لإرسال رسائل OTP في Firebase حالياً.";
+    }
+    if (code === "auth/captcha-check-failed" || code === "auth/invalid-app-credential") {
+        return "فشل التحقق الأمني reCAPTCHA. أعيدي المحاولة أو أعيدي تحميل الصفحة.";
+    }
+    if (code === "auth/network-request-failed") {
+        return "تعذّر إرسال رمز التحقق بسبب مشكلة في الاتصال بالإنترنت.";
+    }
+
+    return "تعذّر إرسال رمز التحقق. تحققي من رقم الجوال وحاولي مرة أخرى.";
+}
+
+async function ensureFirebasePhoneAuth() {
+    if (!window.firebase || !window.firebase.auth) {
+        throw new Error("firebase-sdk-missing");
+    }
+    if (!isFirebaseConfigReady()) {
+        throw new Error("firebase-config-missing");
+    }
+
+    if (!firebaseAppInstance) {
+        firebaseAppInstance = window.firebase.apps.length
+            ? window.firebase.app()
+            : window.firebase.initializeApp(FIREBASE_CONFIG);
+    }
+
+    if (!firebasePhoneAuth) {
+        firebasePhoneAuth = firebaseAppInstance.auth();
+    }
+
+    if (!firebaseRecaptchaVerifier) {
+        // 2) ننشئ reCAPTCHA مرة واحدة فقط وبشكل غير مرئي داخل النموذج.
+        firebaseRecaptchaVerifier = new window.firebase.auth.RecaptchaVerifier(
+            "recaptcha-container",
+            {
+                size: "invisible",
+                callback: () => {
+                    // يتم استدعاؤها تلقائياً عند نجاح reCAPTCHA غير المرئي.
+                },
+            },
+            firebasePhoneAuth
+        );
+
+        await firebaseRecaptchaVerifier.render();
+    }
+
+    return firebasePhoneAuth;
+}
+
+function buildPendingRegistrationPayload() {
+    const fullname = document.getElementById("reg-fullname").value.trim();
+    const names = fullname.split(/\s+/);
+    if (names.length < 3) {
+        showNotification("مطلوب على الأقل ثلاثة أسماء");
+        return null;
+    }
+
+    const emailInput = getAuthEmailInput();
+    const password = getAuthPassword();
+    const phone = document.getElementById("reg-phone").value.trim();
+    const selectedCountryCode = getSelectedPhoneCountryCode();
+    const email = normalizeEmailInput(emailInput);
+    const role = resolveRoleFromEmail(email);
+    const firebasePhoneNumber = formatPhoneForFirebase(phone, selectedCountryCode);
+
+    if (!emailInput) {
+        showNotification("أدخلي الرقم الجامعي.");
+        return null;
+    }
+    if (!isValidStudentEmailLocalPart(emailInput)) {
+        showNotification("يجب إدخال الرقم الجامعي من 9 أرقام.");
+        return null;
+    }
+    if (!isStrongPassword(password)) {
+        showNotification(
+            "كلمة المرور يجب أن تكون 8 أحرف على الأقل وتحتوي على حرف كبير وحرف صغير ورقم ورمز خاص."
+        );
+        return null;
+    }
+    if (!phone) {
+        showNotification("أدخلي رقم الجوال.");
+        return null;
+    }
+    if (!firebasePhoneNumber) {
+        showNotification("أدخلي رقم جوال صحيح. يمكنكِ اختيار الدولة ثم كتابة الرقم المحلي، أو إدخال الرقم كاملًا مثل +201234567890.");
+        return null;
+    }
+    if (role === "admin") {
+        showNotification(
+            "حساب الإدارة موجود أساساً. استخدمي «تسجيل الدخول»."
+        );
+        return null;
+    }
+
+    return {
+        fullname,
+        email,
+        password,
+        phone,
+        role,
+        firebasePhoneNumber,
+    };
+}
+
+async function finalizeRegisterAfterPhoneVerification(verifiedPhoneData) {
+    const payload = pendingRegistrationPayload;
+    if (!payload) {
+        showNotification("انتهت جلسة التحقق. أعيدي إرسال الرمز مرة أخرى.");
+        return;
+    }
+
+    const pwdHash = await hashPassword(payload.password);
+    const db = await loadDb();
+    const existing = findUserByEmail(db, payload.email);
+
+    if (existing) {
+        showNotification(
+            "الرقم الجامعي مسجّل مسبقاً. استخدمي «تسجيل الدخول»."
+        );
+        resetOtpFlow();
+        return;
+    }
+
+    // 4) بعد نجاح OTP نكمل نفس التسجيل القديم ونضيف علامة التحقق على الرقم.
+    const uid = newUid();
+    const row = {
+        ...buildUserPayload(uid, payload.fullname, payload.email, payload.phone, "", payload.role),
+        pwdHash,
+        phoneVerified: true,
+        phoneVerifiedAt: new Date().toISOString(),
+        verifiedPhoneNumber: payload.firebasePhoneNumber,
+        firebasePhoneUid: verifiedPhoneData?.uid || "",
+    };
+
+    db.users.push(row);
+    await saveDb(db);
+    userData = toPublicUser(row);
+
+    if (userData && userData.role !== "admin") {
+        subscribeCurrentUserHours(userData.uid);
+    } else {
+        clearHoursSubscription();
+    }
+
+    resetOtpFlow();
+    if (firebasePhoneAuth) {
+        firebasePhoneAuth.signOut().catch(() => {});
+    }
+    startApp();
 }
 
 async function buildDbJsonSnapshot() {
@@ -1331,6 +1650,7 @@ function toPublicUser(u) {
         role: row.role,
         college: row.college,
         volunteerEventIds: [...ids],
+        phoneVerified: Boolean(row.phoneVerified),
     };
 }
 
@@ -1479,9 +1799,13 @@ function syncRegisterHintsVisibility(mode) {
     const isRegister = mode === "register";
     const emailHint = document.getElementById("register-email-hint");
     const passwordHints = document.getElementById("pw-hints");
+    const otpPanel = document.getElementById("otp-verification-panel");
 
     if (emailHint) emailHint.hidden = !isRegister;
     if (passwordHints) passwordHints.hidden = !isRegister;
+    if (otpPanel && !isRegister) {
+        otpPanel.hidden = true;
+    }
 }
 
 function sanitizeStudentIdInput() {
@@ -1508,6 +1832,9 @@ function setAuthMode(mode) {
     syncAuthEmailField(mode);
     syncForgotPasswordVisibility(mode);
     syncRegisterHintsVisibility(mode);
+    if (!isRegister) {
+        resetOtpFlow();
+    }
     if (isRegister) {
         sanitizeStudentIdInput();
     }
@@ -1643,52 +1970,15 @@ async function handleLogin() {
 }
 
 async function handleRegister() {
-    const fullname = document.getElementById("reg-fullname").value.trim();
-    const names = fullname.split(/\s+/);
-    if (names.length < 3) {
-        showNotification("مطلوب على الأقل ثلاثة أسماء");
-        return;
-    }
-
-    const emailInput = getAuthEmailInput();
-    const password = getAuthPassword();
-    const phone = document.getElementById("reg-phone").value.trim();
-    const email = normalizeEmailInput(emailInput);
-    const role = resolveRoleFromEmail(email);
-
-    if (!emailInput) {
-        showNotification("أدخلي الرقم الجامعي.");
-        return;
-    }
-    if (!isValidStudentEmailLocalPart(emailInput)) {
-        showNotification("يجب إدخال الرقم الجامعي من 9 أرقام.");
-        return;
-    }
-    if (!isStrongPassword(password)) {
-        showNotification(
-            "كلمة المرور يجب أن تكون 8 أحرف على الأقل وتحتوي على حرف كبير وحرف صغير ورقم ورمز خاص."
-        );
-        return;
-    }
-    if (!phone) {
-        showNotification("أدخلي رقم الجوال.");
-        return;
-    }
-
-    if (role === "admin") {
-        showNotification(
-            "حساب الإدارة موجود أساساً. استخدمي «تسجيل الدخول»."
-        );
-        return;
-    }
+    const payload = buildPendingRegistrationPayload();
+    if (!payload) return;
 
     showLoader(true);
+    setAuthSubmitLoading(true);
 
     try {
-        const pwdHash = await hashPassword(password);
         const db = await loadDb();
-        const existing = findUserByEmail(db, email);
-
+        const existing = findUserByEmail(db, payload.email);
         if (existing) {
             showNotification(
                 "الرقم الجامعي مسجّل مسبقاً. استخدمي «تسجيل الدخول»."
@@ -1696,28 +1986,65 @@ async function handleRegister() {
             return;
         }
 
-        const uid = newUid();
-        const row = {
-            ...buildUserPayload(uid, fullname, email, phone, "", role),
-            pwdHash,
-        };
-        db.users.push(row);
-        await saveDb(db);
-        userData = toPublicUser(row);
+        // 3) إذا كانت البيانات سليمة نرسل SMS OTP قبل حفظ الحساب محلياً.
+        const auth = await ensureFirebasePhoneAuth();
 
-        if (userData && userData.role !== "admin") {
-            subscribeCurrentUserHours(userData.uid);
-        } else {
-            clearHoursSubscription();
-        }
+        // نحفظ بيانات التسجيل مؤقتاً حتى نكمل إنشاء الحساب بعد نجاح OTP.
+        pendingRegistrationPayload = payload;
 
-        startApp();
+        firebaseConfirmationResult = await auth.signInWithPhoneNumber(
+            payload.firebasePhoneNumber,
+            firebaseRecaptchaVerifier
+        );
+
+        setOtpPanelVisible(
+            true,
+            `تم إرسال رمز التحقق إلى ${payload.phone}. أدخلي الرمز لإكمال إنشاء الحساب.`
+        );
+        showNotification("تم إرسال رمز التحقق بنجاح.");
     } catch (err) {
         console.error(err);
-        showNotification(
-            "تعذّر إنشاء الحساب. تأكدي أن المتصفح يدعم IndexedDB."
-        );
+        resetOtpFlow();
+
+        if (err?.message === "firebase-config-missing") {
+            showNotification("أكملي إعداد Firebase أولاً داخل ملف main.js.");
+        } else if (err?.message === "firebase-sdk-missing") {
+            showNotification("تعذّر تحميل مكتبة Firebase. تحققي من اتصال الإنترنت.");
+        } else {
+            showNotification(getFirebasePhoneAuthErrorMessage(err, "send"));
+        }
     } finally {
+        setAuthSubmitLoading(false);
+        showLoader(false);
+    }
+}
+
+async function handleOtpVerification() {
+    const { input, verifyButton } = getOtpPanelElements();
+    const code = input ? input.value.trim() : "";
+
+    if (!firebaseConfirmationResult || !pendingRegistrationPayload) {
+        showNotification("أرسلي رمز التحقق أولاً من خلال زر إنشاء الحساب.");
+        return;
+    }
+    if (!/^\d{6}$/.test(code)) {
+        showNotification("أدخلي رمز التحقق المكوّن من 6 أرقام.");
+        return;
+    }
+
+    showLoader(true);
+    setButtonLoadingState(verifyButton, true, "تأكيد الرمز", "جاري التحقق...");
+
+    try {
+        // 5) نؤكد الرمز ثم نرجع إلى منطق إنشاء الحساب الحالي.
+        const result = await firebaseConfirmationResult.confirm(code);
+        await finalizeRegisterAfterPhoneVerification(result.user);
+        showNotification("تم التحقق من رقم الجوال وإنشاء الحساب بنجاح.");
+    } catch (err) {
+        console.error(err);
+        showNotification(getFirebasePhoneAuthErrorMessage(err, "verify"));
+    } finally {
+        setButtonLoadingState(verifyButton, false, "تأكيد الرمز", "جاري التحقق...");
         showLoader(false);
     }
 }
@@ -2966,6 +3293,25 @@ document.addEventListener("DOMContentLoaded", () => {
     const authEmailEl = document.getElementById("reg-email");
     if (authEmailEl) {
         authEmailEl.addEventListener("input", sanitizeStudentIdInput);
+    }
+
+    const phoneCountryEl = document.getElementById("reg-phone-country");
+    if (phoneCountryEl) {
+        phoneCountryEl.addEventListener("change", syncPhonePlaceholder);
+        syncPhonePlaceholder();
+    }
+
+    const otpInput = document.getElementById("otp-code");
+    if (otpInput) {
+        otpInput.addEventListener("input", () => {
+            otpInput.value = otpInput.value.replace(/\D/g, "").slice(0, 6);
+        });
+        otpInput.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") {
+                e.preventDefault();
+                handleOtpVerification();
+            }
+        });
     }
 
     ["forgot-password-new", "forgot-password-confirm"].forEach((id) => {

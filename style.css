@@ -512,6 +512,55 @@
           background: rgba(0, 96, 100, 0.04);
       }
 
+      .phone-field {
+          display: flex;
+          align-items: stretch;
+          direction: ltr;
+          border: 1.5px solid #eee;
+          border-radius: 12px;
+          background: #fafafa;
+          overflow: hidden;
+          transition: 0.3s;
+      }
+
+      .phone-field:focus-within {
+          border-color: var(--primary);
+          background: #fff;
+          box-shadow: 0 0 8px rgba(0, 96, 100, 0.1);
+      }
+
+      .phone-field__country {
+          width: auto;
+          min-width: 124px;
+          border: none;
+          border-left: 1px solid rgba(0, 96, 100, 0.12);
+          background: rgba(0, 96, 100, 0.04);
+          color: #355353;
+          font-family: "Tajawal", sans-serif;
+          font-weight: 700;
+          padding: 0 10px;
+          outline: none;
+          cursor: pointer;
+      }
+
+      .phone-field input {
+          border: none;
+          border-radius: 0;
+          background: transparent;
+          box-shadow: none;
+          text-align: left;
+      }
+
+      .phone-field input:focus {
+          border-color: transparent;
+          background: transparent;
+          box-shadow: none;
+      }
+
+      .register-hint--phone {
+          margin-top: 8px;
+      }
+
       .register-hint,
       .password-hints {
           margin-top: 8px;
@@ -575,6 +624,17 @@
       @media (max-width: 700px) {
           #reg-extra-fields {
               grid-template-columns: 1fr;
+          }
+
+          .phone-field {
+              flex-direction: column;
+          }
+
+          .phone-field__country {
+              min-width: 100%;
+              border-left: none;
+              border-bottom: 1px solid rgba(0, 96, 100, 0.12);
+              padding: 10px 12px;
           }
       }
 
@@ -647,6 +707,49 @@
           width: auto;
           margin-top: 0;
           padding-inline: 22px;
+      }
+
+      .otp-verification-panel {
+          margin-bottom: 16px;
+          padding: 16px;
+          border-radius: 18px;
+          background: #f8fbfb;
+          border: 1px solid rgba(0, 96, 100, 0.12);
+          text-align: right;
+      }
+
+      .otp-verification-panel__title {
+          margin: 0 0 8px;
+          color: var(--primary);
+          font-size: 1rem;
+      }
+
+      .otp-verification-panel__hint {
+          margin: 0 0 14px;
+          color: #5f6f6f;
+          line-height: 1.7;
+          font-size: 0.9rem;
+      }
+
+      .otp-verification-panel__field {
+          margin-bottom: 12px;
+      }
+
+      .otp-verification-panel__actions {
+          display: flex;
+          gap: 10px;
+          flex-wrap: wrap;
+          justify-content: flex-end;
+      }
+
+      #otp-code {
+          letter-spacing: 0.35rem;
+          text-align: center;
+          font-size: 1.05rem;
+      }
+
+      #recaptcha-container {
+          min-height: 1px;
       }
 
       /* نافذة نبذة عنا */
@@ -1890,6 +1993,10 @@
           .admin-storage-btn {
               width: 100%;
               justify-content: center;
+          }
+
+          .otp-verification-panel__actions {
+              flex-direction: column;
           }
       }
 
