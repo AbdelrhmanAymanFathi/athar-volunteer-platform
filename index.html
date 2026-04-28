@@ -104,6 +104,8 @@
     </div>
   </div>
 
+  <!-- MFA profile box moved into profile page to avoid showing above nav -->
+
   <div id="about-modal">
     <div class="about-content">
       <div class="logo-about-container">
@@ -124,6 +126,7 @@
       <button onclick="closeAbout()" class="btn-login" style="width: auto; padding: 12px 40px">
         ابدئي رحلتكِ الآن
       </button>
+      <button onclick="testOpenMfaModal()" class="btn-modal-secondary" style="width: auto; margin-top:12px">اختبار المصادقة الثنائية</button>
     </div>
   </div>
 
@@ -279,6 +282,16 @@
               <i class="fas fa-award"></i> عرض السجل التطوعي
             </button>
           </div>
+          <div class="p-box" id="mfa-profile-box" style="margin-top:20px">
+            <h4 style="margin-bottom:8px">المصادقة الثنائية</h4>
+            <div id="mfa-profile-content">
+              <div id="mfa-status-text">تحميل حالة المصادقة...</div>
+              <div style="margin-top:8px">
+                <button type="button" id="mfa-profile-enable-btn" class="btn-login" style="display:none">تفعيل المصادقة الثنائية</button>
+                <button type="button" id="mfa-profile-manage-btn" class="btn-modal-secondary" style="display:none">إدارة المصادقة الثنائية</button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -418,6 +431,70 @@
 
   </div>
 
+  <!-- MFA setup modal -->
+  <div id="mfa-setup-modal" class="modal-overlay">
+    <div class="modal-panel" onclick="event.stopPropagation()">
+      <h3 class="modal-title">تفعيل المصادقة الثنائية (TOTP)</h3>
+      <p class="modal-subtitle">امسحي رمز QR في تطبيق المصادقة (مثل Google Authenticator) ثم أدخلي رمز التحقق للتحقق.</p>
+      <div id="mfa-setup-status" class="mfa-status"></div>
+      <div id="mfa-qr" style="text-align:center; margin: 12px 0"></div>
+      <div class="input-group">
+        <label for="mfa-setup-code">رمز التحقق من التطبيق</label>
+        <input type="text" id="mfa-setup-code" placeholder="000000" inputmode="numeric" maxlength="6" />
+      </div>
+      <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:12px">
+        <button type="button" class="btn-modal-secondary" id="mfa-setup-skip">تخطي</button>
+        <button type="button" class="btn-login" id="mfa-setup-confirm">تأكيد وتفعيل</button>
+      </div>
+      <div id="mfa-backup-codes" style="margin-top:12px" hidden>
+        <h4>رموز الطوارئ — احتفظي بها في مكان آمن</h4>
+        <pre id="mfa-backup-list" style="white-space:pre-wrap; background:#f7f7f7; padding:10px; border-radius:6px"></pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- MFA verification prompt (shown at login) -->
+  <div id="mfa-prompt-modal" class="modal-overlay">
+    <div class="modal-panel" onclick="event.stopPropagation()">
+      <h3 class="modal-title">أدخلي رمز المصادقة</h3>
+      <p class="modal-subtitle">أدخلي رمز التطبيق أو أحد رموز الطوارئ.</p>
+      <div id="mfa-prompt-status" class="mfa-status"></div>
+      <div class="input-group">
+        <label for="mfa-code-input">رمز المصادقة</label>
+        <input type="text" id="mfa-code-input" placeholder="000000 أو رمز الطوارئ" />
+      </div>
+      <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:12px">
+        <button type="button" class="btn-modal-secondary" id="mfa-prompt-cancel">إلغاء</button>
+        <button type="button" class="btn-login" id="mfa-verify-btn">تأكيد</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MFA management modal (profile) -->
+  <div id="mfa-manage-modal" class="modal-overlay">
+    <div class="modal-panel" onclick="event.stopPropagation()">
+      <h3 class="modal-title">إدارة المصادقة الثنائية</h3>
+      <div id="mfa-manage-status" class="mfa-status"></div>
+      <p id="mfa-manage-info"></p>
+      <div id="mfa-manage-devices" style="margin-top:8px">
+        <!-- devices will be rendered here -->
+      </div>
+      <div id="mfa-manage-backup" hidden>
+        <h4>رموز الطوارئ — احتفظي بها في مكان آمن</h4>
+        <pre id="mfa-manage-backup-list" style="white-space:pre-wrap; background:#f7f7f7; padding:10px; border-radius:6px"></pre>
+      </div>
+      <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:12px">
+        <button type="button" class="btn-modal-secondary" id="mfa-manage-close">إغلاق</button>
+        <button type="button" class="btn-modal-secondary" id="mfa-manage-regenerate">تجديد رموز الطوارئ</button>
+        <button type="button" class="btn-login" id="mfa-manage-delete">إلغاء تفعيل المصادقة الثنائية</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="./mfa.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
   <script src="./main.js"></script>
 </body>
 

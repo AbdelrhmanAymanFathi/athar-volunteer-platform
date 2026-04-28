@@ -1189,6 +1189,26 @@
           font-size: 0.95rem;
       }
 
+    /* Inline MFA modal status */
+    .mfa-status {
+        display: none;
+        margin-top: 8px;
+        padding: 8px 12px;
+        border-radius: 8px;
+        font-weight: 700;
+        font-size: 0.95rem;
+    }
+    .mfa-status.mfa-status--error {
+        background: #fdecea;
+        color: #8a1f1f;
+        border: 1px solid #f5c6cb;
+    }
+    .mfa-status.mfa-status--ok {
+        background: #e9f7ef;
+        color: #155724;
+        border: 1px solid #c3e6cb;
+    }
+
       .volunteer-log-list {
           list-style: none;
           margin: 0 0 1.25rem;

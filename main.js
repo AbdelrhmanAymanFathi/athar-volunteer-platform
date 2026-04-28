@@ -5,22 +5,21 @@
  */
 
 const IDB_NAME = "athar_db";
-const IDB_VERSION = 6;
+const IDB_VERSION = 7;
 const USERS_STORE = "users";
 const EVENTS_STORE = "events";
 const REQUESTS_STORE = "requests";
 const CHATS_STORE = "chats";
+const MFA_STORE = "mfa";
 const LEGACY_LS_KEY = "athar_local_v1";
 const ADMIN_ACCOUNTS_SEED_KEY = "athar_college_admin_seed_version";
 const ADMIN_ACCOUNTS_SEED_VERSION = "v1";
 const REQUEST_STATUS_PENDING = "pending";
 const REQUEST_STATUS_APPROVED = "approved";
 const REQUEST_STATUS_WAITLISTED = "waitlisted";
-const REQUEST_STATUS_COMPLETED = "completed";
 const REQUEST_STATUS_WITHDRAWN = "withdrawn";
 const STUDENT_EMAIL_DOMAIN = "pnu.edu.sa";
 const DB_SYNC_CHANNEL_NAME = "athar_db_sync";
-const DB_SYNC_STORAGE_KEY = "athar_db_sync_ping";
 const EVENT_MEMBERS_EXPANDED_STORAGE_KEY = "athar_event_members_expanded_state";
 
 const COLLEGE_CATALOG = [
@@ -28,7 +27,6 @@ const COLLEGE_CATALOG = [
         key: "computer",
         name: "الحاسب",
         displayName: "كلية الحاسب",
-        icon: "💻",
         adminEmail: "pnu31@pnu.edu.sa",
         adminPassword: "P@ssw0rd31",
     },
@@ -43,7 +41,6 @@ const COLLEGE_CATALOG = [
     {
         key: "nursing",
         name: "التمريض",
-        displayName: "كلية التمريض",
         icon: "🏥",
         adminEmail: "pnu101@pnu.edu.sa",
         adminPassword: "P@ssw0rd101",
@@ -135,6 +132,35 @@ function showNotification(message, duration = 4000) {
     }, duration);
 }
 
+// Modal-level MFA status helpers
+function setMfaStatus(type, message, isError = false) {
+    const idMap = {
+        setup: "mfa-setup-status",
+        prompt: "mfa-prompt-status",
+        manage: "mfa-manage-status",
+    };
+    const id = idMap[type];
+    if (!id) return;
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = message || "";
+    el.classList.toggle("mfa-status--error", !!isError);
+    el.classList.toggle("mfa-status--ok", !!message && !isError);
+    el.style.display = message ? "block" : "none";
+}
+
+function showMfaSetupStatus(msg, isError = false) {
+    setMfaStatus("setup", msg, isError);
+}
+
+function showMfaPromptStatus(msg, isError = false) {
+    setMfaStatus("prompt", msg, isError);
+}
+
+function showMfaManageStatus(msg, isError = false) {
+    setMfaStatus("manage", msg, isError);
+}
+
 function showLoader(v) {
     document.getElementById("loader").style.display = v ? "flex" : "none";
 }
@@ -215,6 +241,303 @@ function updateDbJsonStatus(message, isError = false) {
     if (!statusEl) return;
     statusEl.textContent = message;
     statusEl.style.color = isError ? "#c0392b" : "#607171";
+}
+
+function isFirebaseConfigReady() {
+    return Object.values(FIREBASE_CONFIG).every(
+        (value) => value && !String(value).startsWith("YOUR_FIREBASE_")
+    );
+}
+
+function getOtpPanelElements() {
+    return {
+        panel: document.getElementById("otp-verification-panel"),
+        input: document.getElementById("otp-code"),
+        statusText: document.getElementById("otp-status-text"),
+        verifyButton: document.getElementById("otp-verify-btn"),
+    };
+}
+
+function setButtonLoadingState(button, isLoading, idleText, loadingText) {
+    if (!button) return;
+    if (!button.dataset.idleText) {
+        button.dataset.idleText = idleText || button.textContent.trim();
+    }
+    button.disabled = Boolean(isLoading);
+    button.textContent = isLoading
+        ? loadingText || "جاري المعالجة..."
+        : button.dataset.idleText;
+}
+
+function setAuthSubmitLoading(isLoading, text = "جاري إرسال الرمز...") {
+    const submitButton = document.getElementById("auth-submit-btn");
+    setButtonLoadingState(submitButton, isLoading, "إنشاء الحساب", text);
+}
+
+function setOtpPanelVisible(isVisible, message = "") {
+    const { panel, input, statusText } = getOtpPanelElements();
+    if (!panel) return;
+
+    panel.hidden = !isVisible;
+    if (statusText && message) {
+        statusText.textContent = message;
+    }
+
+    if (isVisible && input) {
+        input.value = "";
+        input.focus();
+    }
+}
+
+function resetOtpFlow() {
+    firebaseConfirmationResult = null;
+    pendingRegistrationPayload = null;
+    setOtpPanelVisible(false);
+    const otpInput = document.getElementById("otp-code");
+    if (otpInput) otpInput.value = "";
+}
+function formatPhoneForFirebase(phone, selectedCountryCode) {
+    const rawValue = String(phone || "").trim();
+    const normalizedValue = rawValue.replace(/[\s()\-]/g, "");
+    const digitsOnly = normalizedValue.replace(/\D/g, "");
+    const normalizedCountryCode = String(selectedCountryCode || "").trim();
+    const countryDigits = normalizedCountryCode.replace(/\D/g, "");
+
+    if (/^\+[1-9]\d{7,14}$/.test(normalizedValue)) {
+        return normalizedValue;
+    }
+
+    if (/^00[1-9]\d{7,14}$/.test(digitsOnly)) {
+        return `+${digitsOnly.slice(2)}`;
+    }
+
+    if (/^05\d{8}$/.test(digitsOnly)) {
+        return `+966${digitsOnly.slice(1)}`;
+    }
+    if (/^5\d{8}$/.test(digitsOnly)) {
+        return `+966${digitsOnly}`;
+    }
+    if (/^9665\d{8}$/.test(digitsOnly)) {
+        return `+${digitsOnly}`;
+    }
+
+    if (countryDigits) {
+        if (digitsOnly.startsWith(countryDigits) && /^[1-9]\d{7,14}$/.test(digitsOnly)) {
+            return `+${digitsOnly}`;
+        }
+
+        const localDigits = digitsOnly.replace(/^0+/, "");
+        const combinedDigits = `${countryDigits}${localDigits}`;
+        if (
+            /^[1-9]\d{5,14}$/.test(localDigits) &&
+            /^[1-9]\d{7,14}$/.test(combinedDigits) &&
+            combinedDigits.length <= 15
+        ) {
+            return `+${combinedDigits}`;
+        }
+    }
+
+    if (/^[1-9]\d{7,14}$/.test(digitsOnly)) {
+        return `+${digitsOnly}`;
+    }
+
+    return "";
+}
+
+
+function getFirebasePhoneAuthErrorMessage(error, phase = "send") {
+    const code = String(error?.code || "").toLowerCase();
+
+    if (phase === "verify") {
+        if (code === "auth/invalid-verification-code") {
+            return "رمز التحقق غير صحيح.";
+        }
+        if (code === "auth/code-expired" || code === "auth/session-expired") {
+            return "انتهت صلاحية رمز التحقق. أعيدي إرسال الرمز مرة أخرى.";
+        }
+        if (code === "auth/network-request-failed") {
+            return "تعذّر التحقق بسبب مشكلة في الاتصال بالإنترنت.";
+        }
+        return "تعذّر التحقق من الرمز. حاولي مرة أخرى.";
+    }
+
+    if (code === "auth/invalid-phone-number" || code === "auth/missing-phone-number") {
+        return "رقم الجوال غير صحيح. تحققي من مفتاح الدولة والرقم المحلي.";
+    }
+    if (code === "auth/invalid-api-key") {
+        return "إعداد Firebase غير صحيح: مفتاح API غير صالح أو عليه قيود تمنع Firebase Auth. راجعي Project Settings وقيود API Key في Google Cloud.";
+    }
+    if (code === "auth/too-many-requests") {
+        return "تمت محاولات كثيرة على هذا الرقم. انتظري قليلًا ثم حاولي مرة أخرى.";
+    }
+    if (code === "auth/quota-exceeded") {
+        return "تم استهلاك الحد المسموح لإرسال رسائل OTP في Firebase حالياً.";
+    }
+    if (code === "auth/captcha-check-failed" || code === "auth/invalid-app-credential") {
+        return "فشل التحقق الأمني reCAPTCHA. أعيدي المحاولة أو أعيدي تحميل الصفحة.";
+    }
+    if (code === "auth/network-request-failed") {
+        return "تعذّر إرسال رمز التحقق بسبب مشكلة في الاتصال بالإنترنت.";
+    }
+
+    return "تعذّر إرسال رمز التحقق. تحققي من رقم الجوال وحاولي مرة أخرى.";
+}
+
+async function ensureFirebasePhoneAuth() {
+    if (!window.firebase || !window.firebase.auth) {
+        throw new Error("firebase-sdk-missing");
+    }
+    if (!isFirebaseConfigReady()) {
+        throw new Error("firebase-config-missing");
+    }
+
+    if (!firebaseAppInstance) {
+        firebaseAppInstance = window.firebase.apps.length
+            ? window.firebase.app()
+            : window.firebase.initializeApp(FIREBASE_CONFIG);
+    }
+
+    if (!firebasePhoneAuth) {
+        firebasePhoneAuth = firebaseAppInstance.auth();
+    }
+
+    if (!firebaseRecaptchaVerifier) {
+        // 2) ننشئ reCAPTCHA مرة واحدة فقط وبشكل غير مرئي داخل النموذج.
+        firebaseRecaptchaVerifier = new window.firebase.auth.RecaptchaVerifier(
+            "recaptcha-container",
+            {
+                size: "invisible",
+                callback: () => {
+                    // يتم استدعاؤها تلقائياً عند نجاح reCAPTCHA غير المرئي.
+                },
+            },
+            firebasePhoneAuth
+        );
+
+        await firebaseRecaptchaVerifier.render();
+    }
+
+    return firebasePhoneAuth;
+}
+
+function buildPendingRegistrationPayload() {
+    const fullname = document.getElementById("reg-fullname").value.trim();
+    const names = fullname.split(/\s+/);
+    if (names.length < 3) {
+        showNotification("مطلوب على الأقل ثلاثة أسماء");
+        return null;
+    }
+
+    const emailInput = getAuthEmailInput();
+    const password = getAuthPassword();
+    const phone = document.getElementById("reg-phone").value.trim();
+    const selectedCountryCode = getSelectedPhoneCountryCode();
+    const email = normalizeEmailInput(emailInput);
+    const role = resolveRoleFromEmail(email);
+    const firebasePhoneNumber = formatPhoneForFirebase(phone, selectedCountryCode);
+
+    if (!emailInput) {
+        showNotification("أدخلي الرقم الجامعي.");
+        return null;
+    }
+    if (!isValidStudentEmailLocalPart(emailInput)) {
+        showNotification("يجب إدخال الرقم الجامعي من 9 أرقام.");
+        return null;
+    }
+    if (!isStrongPassword(password)) {
+        showNotification(
+            "كلمة المرور يجب أن تكون 8 أحرف على الأقل وتحتوي على حرف كبير وحرف صغير ورقم ورمز خاص."
+        );
+        return null;
+    }
+    if (!phone) {
+        showNotification("أدخلي رقم الجوال.");
+        return null;
+    }
+    if (!firebasePhoneNumber) {
+        showNotification("أدخلي رقم جوال صحيح. يمكنكِ اختيار الدولة ثم كتابة الرقم المحلي، أو إدخال الرقم كاملًا مثل +201234567890.");
+        return null;
+    }
+    if (role === "admin") {
+        showNotification(
+            "حساب الإدارة موجود أساساً. استخدمي «تسجيل الدخول»."
+        );
+        return null;
+    }
+
+    return {
+        fullname,
+        email,
+        password,
+        phone,
+        role,
+        firebasePhoneNumber,
+    };
+}
+
+async function finalizeRegisterAfterPhoneVerification(verifiedPhoneData) {
+    const payload = pendingRegistrationPayload;
+    if (!payload) {
+        showNotification("انتهت جلسة التحقق. أعيدي إرسال الرمز مرة أخرى.");
+        return;
+    }
+
+    const pwdHash = await hashPassword(payload.password);
+    const db = await loadDb();
+    const existing = findUserByEmail(db, payload.email);
+
+    if (existing) {
+        showNotification(
+            "الرقم الجامعي مسجّل مسبقاً. استخدمي «تسجيل الدخول»."
+        );
+        resetOtpFlow();
+        return;
+    }
+
+    // 4) بعد نجاح OTP نكمل نفس التسجيل القديم ونضيف علامة التحقق على الرقم.
+    const uid = newUid();
+    const row = {
+        ...buildUserPayload(uid, payload.fullname, payload.email, payload.phone, "", payload.role),
+        pwdHash,
+        phoneVerified: true,
+        phoneVerifiedAt: new Date().toISOString(),
+        verifiedPhoneNumber: payload.firebasePhoneNumber,
+        firebasePhoneUid: verifiedPhoneData?.uid || "",
+    };
+
+    db.users.push(row);
+    await saveDb(db);
+    userData = toPublicUser(row);
+
+    if (userData && userData.role !== "admin") {
+        subscribeCurrentUserHours(userData.uid);
+    } else {
+        clearHoursSubscription();
+    }
+
+    // Prompt user to optionally enroll TOTP (client-side) before starting app
+    try {
+        console.log("[MFA] finalizeRegister: preparing to enroll", { uid: userData?.uid });
+        if (payload && payload.password) {
+            const enrolled = await showMfaSetupModal(userData.uid, payload.password, userData.email);
+            console.log("[MFA] showMfaSetupModal result:", enrolled);
+            try {
+                // Dispose of the plaintext password as soon as we can
+                payload.password = undefined;
+                if (pendingRegistrationPayload) pendingRegistrationPayload.password = undefined;
+            } catch (e) {}
+        } else {
+            console.log("[MFA] finalizeRegister: no password in payload, skipping MFA enrollment");
+        }
+    } catch (err) {
+        console.warn("MFA enrollment flow interrupted", err);
+    }
+
+    resetOtpFlow();
+    if (firebasePhoneAuth) {
+        firebasePhoneAuth.signOut().catch(() => {});
+    }
+    startApp();
 }
 
 async function buildDbJsonSnapshot() {
@@ -487,7 +810,43 @@ function openIdb() {
             return;
         }
         const req = indexedDB.open(IDB_NAME, IDB_VERSION);
-        req.onerror = () => reject(req.error);
+        req.onerror = () => {
+            const err = req.error;
+            if (err && (err.name === "VersionError" || err.name === "InvalidStateError")) {
+                // Existing DB has higher version; open without version to use current DB
+                const fallback = indexedDB.open(IDB_NAME);
+                fallback.onerror = () => reject(fallback.error);
+                fallback.onsuccess = () => {
+                    idbConnection = fallback.result;
+                    idbConnection.onclose = () => {
+                        idbConnection = null;
+                    };
+                    resolve(idbConnection);
+                };
+                fallback.onupgradeneeded = (e) => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains(USERS_STORE)) {
+                        const os = db.createObjectStore(USERS_STORE, { keyPath: "uid" });
+                        os.createIndex("by_email", "email", { unique: true });
+                    }
+                    if (!db.objectStoreNames.contains(EVENTS_STORE)) {
+                        db.createObjectStore(EVENTS_STORE, { keyPath: "id" });
+                    }
+                    if (!db.objectStoreNames.contains(REQUESTS_STORE)) {
+                        db.createObjectStore(REQUESTS_STORE, { keyPath: "id" });
+                    }
+                    if (!db.objectStoreNames.contains(CHATS_STORE)) {
+                        db.createObjectStore(CHATS_STORE, { keyPath: "id" });
+                    }
+                    if (!db.objectStoreNames.contains(MFA_STORE)) {
+                        const os2 = db.createObjectStore(MFA_STORE, { keyPath: "userId" });
+                        os2.createIndex("by_userId", "userId", { unique: true });
+                    }
+                };
+                return;
+            }
+            reject(err);
+        };
         req.onsuccess = () => {
             idbConnection = req.result;
             idbConnection.onclose = () => {
@@ -509,6 +868,10 @@ function openIdb() {
             }
             if (!db.objectStoreNames.contains(CHATS_STORE)) {
                 db.createObjectStore(CHATS_STORE, { keyPath: "id" });
+            }
+            if (!db.objectStoreNames.contains(MFA_STORE)) {
+                const os = db.createObjectStore(MFA_STORE, { keyPath: "userId" });
+                os.createIndex("by_userId", "userId", { unique: true });
             }
         };
     });
@@ -547,6 +910,94 @@ function idbGetAllChats(db) {
         const r = tx.objectStore(CHATS_STORE).getAll();
         r.onsuccess = () => resolve(r.result || []);
         r.onerror = () => reject(r.error);
+    });
+}
+
+function idbGetMfaRecord(db, userId) {
+    return new Promise(async (resolve, reject) => {
+        try {
+            if (!db.objectStoreNames.contains(MFA_STORE)) {
+                // ensure store exists by upgrading DB
+                await ensureMfaStore();
+                db = await openIdb();
+            }
+            const tx = db.transaction(MFA_STORE, "readonly");
+            const r = tx.objectStore(MFA_STORE).get(userId);
+            r.onsuccess = () => resolve(r.result || null);
+            r.onerror = () => reject(r.error);
+        } catch (err) {
+            reject(err);
+        }
+    });
+}
+
+function idbPutMfaRecord(db, record) {
+    return new Promise(async (resolve, reject) => {
+        try {
+            if (!db.objectStoreNames.contains(MFA_STORE)) {
+                await ensureMfaStore();
+                db = await openIdb();
+            }
+            const tx = db.transaction(MFA_STORE, "readwrite");
+            const store = tx.objectStore(MFA_STORE);
+            const r = store.put(record);
+            r.onsuccess = () => {
+                broadcastDbChange();
+                resolve(r.result);
+            };
+            r.onerror = () => reject(r.error);
+        } catch (err) {
+            reject(err);
+        }
+    });
+}
+
+function idbDeleteMfaRecord(db, userId) {
+    return new Promise(async (resolve, reject) => {
+        try {
+            if (!db.objectStoreNames.contains(MFA_STORE)) {
+                await ensureMfaStore();
+                db = await openIdb();
+            }
+            const tx = db.transaction(MFA_STORE, "readwrite");
+            const r = tx.objectStore(MFA_STORE).delete(userId);
+            r.onsuccess = () => {
+                broadcastDbChange();
+                resolve();
+            };
+            r.onerror = () => reject(r.error);
+        } catch (err) {
+            reject(err);
+        }
+    });
+}
+
+async function ensureMfaStore() {
+    // Ensure IDB connection exists
+    await ensureIdbInit();
+    let db = await openIdb();
+    if (db.objectStoreNames.contains(MFA_STORE)) return;
+    // Need to upgrade DB to add MFA_STORE
+    const oldVersion = db.version;
+    try {
+        db.close();
+    } catch (e) {}
+    idbConnection = null;
+    const newVersion = oldVersion + 1;
+    return new Promise((resolve, reject) => {
+        const req = indexedDB.open(IDB_NAME, newVersion);
+        req.onupgradeneeded = (e) => {
+            const d = e.target.result;
+            if (!d.objectStoreNames.contains(MFA_STORE)) {
+                d.createObjectStore(MFA_STORE, { keyPath: "userId" });
+            }
+        };
+        req.onsuccess = () => {
+            idbConnection = req.result;
+            idbConnection.onclose = () => { idbConnection = null; };
+            resolve();
+        };
+        req.onerror = () => reject(req.error);
     });
 }
 
@@ -1630,6 +2081,8 @@ async function handleLogin() {
         } else {
             clearHoursSubscription();
         }
+        // Hide the global loader. MFA prompt is shown from the profile page only.
+        showLoader(false);
 
         startApp();
     } catch (err) {
@@ -1736,6 +2189,13 @@ function startApp() {
     document.getElementById("prof-phone").innerText = userData.phone;
     renderHomeColleges();
 
+    // Render MFA status in profile
+    try {
+        void renderMfaProfileSection();
+    } catch (e) {
+        console.warn("MFA profile render failed", e);
+    }
+
     if (userData && userData.role !== "admin") {
         void refreshVolunteerHoursUI();
     } else {
@@ -1774,11 +2234,387 @@ function updateChart(h) {
         `أنجزتِ ${hrs} من ${cap} ساعة تطوعية`;
 }
 
+async function showMfaSetupModal(userId, password, accountLabel) {
+    console.log("[MFA] showMfaSetupModal start", { userId, accountLabel });
+    if (!window.MFA) {
+        console.warn("[MFA] window.MFA not available");
+        return false;
+    }
+    const modal = document.getElementById("mfa-setup-modal");
+    const qrEl = document.getElementById("mfa-qr");
+    const codeInput = document.getElementById("mfa-setup-code");
+    const confirmBtn = document.getElementById("mfa-setup-confirm");
+    const skipBtn = document.getElementById("mfa-setup-skip");
+    const backupPanel = document.getElementById("mfa-backup-codes");
+    const backupList = document.getElementById("mfa-backup-list");
+
+    qrEl.innerHTML = "";
+    codeInput.value = "";
+    backupPanel.hidden = true;
+    backupList.textContent = "";
+
+    // create and store encrypted secret, and get provisioning URI + backup codes
+    let enrollResult;
+    try {
+        console.log("[MFA] calling enrollForUser");
+        enrollResult = await window.MFA.enrollForUser(userId, password, accountLabel || userId, "Athar");
+        console.log("[MFA] enrollForUser returned", enrollResult && { provisioningUri: enrollResult.provisioningUri });
+    } catch (err) {
+        console.error("MFA enroll failed", err);
+        return false;
+    }
+
+    // render QR
+    try {
+        // QRCode lib creates an element inside
+        new QRCode(qrEl, { text: enrollResult.provisioningUri, width: 160, height: 160 });
+    } catch (err) {
+        console.warn("[MFA] QR render failed, falling back to text", err);
+        qrEl.textContent = enrollResult.provisioningUri || "";
+    }
+
+    modal.classList.add("is-open");
+    console.log("[MFA] setup modal opened");
+
+    return await new Promise((resolve) => {
+        const cleanup = () => {
+            confirmBtn.disabled = false;
+            confirmBtn.textContent = "تأكيد وتفعيل";
+            modal.classList.remove("is-open");
+            confirmBtn.removeEventListener("click", onConfirm);
+            skipBtn.removeEventListener("click", onSkip);
+            skipBtn.removeEventListener("click", onDone);
+        };
+
+        const onSkip = () => {
+            // User chose to skip enrollment
+            // wipe local password reference
+            password = undefined;
+            cleanup();
+            resolve(false);
+        };
+
+        // will be reassigned later if needed
+        let onDone = null;
+
+        const onConfirm = async () => {
+            const code = codeInput.value.trim();
+            if (!/^\d{6}$/.test(code)) {
+                showNotification("أدخلي رمزاً صالحاً من تطبيق المصادقة.");
+                return;
+            }
+            setButtonLoadingState(confirmBtn, true, "تأكيد وتفعيل", "جاري التحقق...");
+            try {
+                const res = await window.MFA.verifyWithPassword(userId, password, code);
+                if (res && res.ok) {
+                    // show backup codes (enrollResult.backupPlain) and keep modal open
+                    backupPanel.hidden = false;
+                    backupList.textContent = (enrollResult.backupPlain || []).join("\n");
+                    showNotification("تم تفعيل المصادقة الثنائية. احتفظي برموز الطوارئ في مكان آمن.");
+                    // disable confirm to prevent repeat
+                    confirmBtn.disabled = true;
+                    // change skip button to act as a Done/Close button
+                    skipBtn.removeEventListener("click", onSkip);
+                    skipBtn.textContent = "تم";
+                    onDone = () => {
+                        // wipe local password reference
+                        password = undefined;
+                        cleanup();
+                        resolve(true);
+                    };
+                    skipBtn.addEventListener("click", onDone);
+                    return;
+                }
+                showNotification("رمز التحقق غير صحيح.");
+            } catch (err) {
+                console.error(err);
+                showNotification("فشل التحقق. حاولي مرة أخرى.");
+            } finally {
+                setButtonLoadingState(confirmBtn, false, "تأكيد وتفعيل", "جاري التحقق...");
+            }
+        };
+
+        confirmBtn.addEventListener("click", onConfirm);
+        skipBtn.addEventListener("click", onSkip);
+    });
+}
+
+async function showMfaPromptModal(userId, password) {
+    const modal = document.getElementById("mfa-prompt-modal");
+    const input = document.getElementById("mfa-code-input");
+    const verifyBtn = document.getElementById("mfa-verify-btn");
+    const cancelBtn = document.getElementById("mfa-prompt-cancel");
+
+    if (input) input.value = "";
+    modal.classList.add("is-open");
+    if (input) input.focus();
+    showMfaPromptStatus("", false);
+
+    return await new Promise((resolve) => {
+        const cleanup = () => {
+            modal.classList.remove("is-open");
+            verifyBtn.removeEventListener("click", onVerify);
+            cancelBtn.removeEventListener("click", onCancel);
+            showMfaPromptStatus("", false);
+        };
+
+        const onCancel = () => {
+            cleanup();
+            resolve(false);
+        };
+
+        const onVerify = async () => {
+            const code = (input && input.value || "").trim();
+            if (!code) {
+                showMfaPromptStatus("أدخلي رمز المصادقة أو رمز الطوارئ.", true);
+                return;
+            }
+            setButtonLoadingState(verifyBtn, true, "تأكيد", "جاري التحقق...");
+            try {
+                const res = await window.MFA.verifyWithPassword(userId, password, code);
+                if (res && res.ok) {
+                    showMfaPromptStatus("", false);
+                    cleanup();
+                    setButtonLoadingState(verifyBtn, false, "تأكيد", "جاري التحقق...");
+                    return resolve(true);
+                }
+                showMfaPromptStatus("رمز المصادقة غير صحيح.", true);
+            } catch (err) {
+                console.error("MFA verify error", err);
+                showMfaPromptStatus("تعذّر التحقق. حاولي مرة أخرى.", true);
+            } finally {
+                setButtonLoadingState(verifyBtn, false, "تأكيد", "جاري التحقق...");
+            }
+        };
+
+        verifyBtn.addEventListener("click", onVerify);
+        cancelBtn.addEventListener("click", onCancel);
+    });
+}
+
 function escapeHtml(text) {
     if (text === undefined || text === null) return "";
     const div = document.createElement("div");
     div.textContent = String(text);
     return div.innerHTML;
+}
+
+async function renderMfaProfileSection() {
+    const box = document.getElementById("mfa-profile-box");
+    const statusText = document.getElementById("mfa-status-text");
+    const enableBtn = document.getElementById("mfa-profile-enable-btn");
+    const manageBtn = document.getElementById("mfa-profile-manage-btn");
+    if (!box || !statusText || !enableBtn || !manageBtn) return;
+    if (!userData) {
+        statusText.textContent = "يجب تسجيل الدخول لعرض حالة المصادقة.";
+        enableBtn.style.display = "none";
+        manageBtn.style.display = "none";
+        return;
+    }
+    statusText.textContent = "جارٍ تحميل حالة المصادقة...";
+    enableBtn.style.display = "none";
+    manageBtn.style.display = "none";
+
+    if (!window.MFA) {
+        statusText.textContent = "المتصفح لا يدعم إدارة المصادقة الثنائية في هذه النسخة.";
+        return;
+    }
+
+    try {
+        const rec = await window.MFA.getMfaRecord(userData.uid);
+        if (!rec) {
+            statusText.textContent = "المصادقة الثنائية غير مفعّلة للحساب.";
+            enableBtn.style.display = "inline-block";
+            enableBtn.onclick = async () => {
+                let pw = getAuthPassword();
+                if (!pw) pw = prompt("أدخلي كلمة المرور لتفعيل المصادقة الثنائية:");
+                if (!pw) return;
+                const ok = await showMfaSetupModal(userData.uid, pw, userData.email);
+                if (ok) {
+                    showNotification("تم تفعيل المصادقة الثنائية. يمكنك إدارة الإعدادات من هنا.");
+                }
+                await renderMfaProfileSection();
+            };
+            return;
+        }
+
+        const devices = Array.isArray(rec.devices) ? rec.devices : [];
+        const deviceCount = devices.length;
+        const firstDevice = devices[0] || {};
+        const label = firstDevice.name || userData.email || userData.uid;
+        const created = firstDevice.createdAt ? new Date(firstDevice.createdAt).toLocaleString("ar-SA") : rec.createdAt ? new Date(rec.createdAt).toLocaleString("ar-SA") : "غير معروف";
+        statusText.innerHTML = `المصادقة الثنائية مفعّلة لـ: <b>${escapeHtml(label)}</b> — <b>${deviceCount}</b> جهاز`;
+        manageBtn.style.display = "inline-block";
+        manageBtn.onclick = async () => {
+            // Require password + MFA verification before opening manage modal
+            let pw = getAuthPassword();
+            if (!pw) pw = prompt("أدخلي كلمة المرور لتأكيد الدخول إلى إعدادات المصادقة الثنائية:");
+            if (!pw) return;
+            try {
+                const ok = await showMfaPromptModal(userData.uid, pw);
+                if (!ok) {
+                    showNotification("فشل التحقق الثنائي. لم يتم فتح إعدادات المصادقة.");
+                    return;
+                }
+                const fresh = await window.MFA.getMfaRecord(userData.uid);
+                openMfaManageModal(fresh);
+            } catch (err) {
+                console.error("MFA manage open error", err);
+                showNotification("تعذّر فتح إعدادات المصادقة.");
+            }
+        };
+    } catch (err) {
+        console.error("renderMfaProfileSection error", err);
+        statusText.textContent = "تعذّر الحصول على حالة المصادقة.";
+    }
+}
+
+function openMfaManageModal(rec) {
+    const modal = document.getElementById("mfa-manage-modal");
+    const info = document.getElementById("mfa-manage-info");
+    const backupPanel = document.getElementById("mfa-manage-backup");
+    const backupList = document.getElementById("mfa-manage-backup-list");
+    const closeBtn = document.getElementById("mfa-manage-close");
+    const regenBtn = document.getElementById("mfa-manage-regenerate");
+    const delBtn = document.getElementById("mfa-manage-delete");
+
+    backupPanel.hidden = true;
+    backupList.textContent = "";
+    info.textContent = "";
+    if (!rec) {
+        info.textContent = "لا توجد بيانات المصادقة لهذا المستخدم.";
+        modal.classList.add("is-open");
+        return;
+    }
+
+    // display devices list
+    const devicesContainer = document.getElementById("mfa-manage-devices");
+    devicesContainer.innerHTML = "";
+    const devices = Array.isArray(rec.devices) ? rec.devices : [];
+    if (devices.length === 0) {
+        info.textContent = "لا توجد أجهزة مسجلة للمصادقة الثنائية.";
+    } else {
+        info.innerHTML = `المصادقة الثنائية مفعّلة — <b>${devices.length}</b> جهاز`;
+        devices.forEach((d) => {
+            const row = document.createElement("div");
+            row.className = "mfa-manage-device-row";
+            const created = d.createdAt ? new Date(d.createdAt).toLocaleString("ar-SA") : "غير معروف";
+            row.innerHTML = `
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #eee">
+                    <div>
+                        <strong>${escapeHtml(d.name || d.deviceId)}</strong><br>
+                        <small>تم التسجيل: ${escapeHtml(created)}</small>
+                    </div>
+                    <div style="display:flex;gap:8px;">
+                        <button class="btn-modal-secondary mfa-device-rename" data-device-id="${escapeAttr(d.deviceId)}">إعادة تسمية</button>
+                        <button class="btn-modal-secondary mfa-device-revoke" data-device-id="${escapeAttr(d.deviceId)}">إلغاء</button>
+                    </div>
+                </div>
+            `;
+            devicesContainer.appendChild(row);
+        });
+    }
+
+    modal.classList.add("is-open");
+
+    const cleanup = () => {
+        modal.classList.remove("is-open");
+        closeBtn.removeEventListener("click", onClose);
+        regenBtn.removeEventListener("click", onRegen);
+        delBtn.removeEventListener("click", onDelete);
+        // detach device button handlers
+        devicesContainer.querySelectorAll(".mfa-device-rename").forEach((b) => b.removeEventListener("click", onRename));
+        devicesContainer.querySelectorAll(".mfa-device-revoke").forEach((b) => b.removeEventListener("click", onRevoke));
+    };
+
+    const onClose = () => cleanup();
+
+    const onRegen = async () => {
+        let pw = prompt("أدخلي كلمة المرور لتجديد رموز الطوارئ:");
+        if (!pw) return;
+        try {
+            setButtonLoadingState(regenBtn, true, "تجديد رموز الطوارئ", "جاري التجديد...");
+            const res = await window.MFA.regenerateBackupCodes(userData.uid, pw);
+            if (res && res.ok) {
+                backupPanel.hidden = false;
+                backupList.textContent = (res.backupPlain || []).join("\n");
+                showNotification("تم تجديد رموز الطوارئ. احتفظي بها في مكان آمن.");
+            } else {
+                showNotification("فشل التحقق أو تجديد الرموز.");
+            }
+        } catch (err) {
+            console.error(err);
+            showNotification("حدث خطأ أثناء تجديد الرموز.");
+        } finally {
+            setButtonLoadingState(regenBtn, false, "تجديد رموز الطوارئ", "جاري التجديد...");
+        }
+    };
+
+    const onDelete = async () => {
+        if (!confirm("هل أنتِ متأكدة من إلغاء تفعيل المصادقة الثنائية؟ سيُطلب إعادة تفعيلها لاحقاً.")) return;
+        try {
+            await window.MFA.deleteMfaRecord(userData.uid);
+            showNotification("تم إلغاء تفعيل المصادقة الثنائية لهذا الحساب.");
+            cleanup();
+            await renderMfaProfileSection();
+        } catch (err) {
+            console.error(err);
+            showNotification("فشل إلغاء تفعيل المصادقة الثنائية.");
+        }
+    };
+
+    // per-device handlers
+    const onRename = async (ev) => {
+        const deviceId = ev.currentTarget.dataset.deviceId;
+        const newName = prompt("أدخلي الاسم الجديد للجهاز:");
+        if (!newName) return;
+        try {
+            const res = await window.MFA.renameMfaDevice(userData.uid, deviceId, newName);
+            if (res && res.ok) {
+                showNotification("تمت إعادة تسمية الجهاز.");
+                const fresh = await window.MFA.getMfaRecord(userData.uid);
+                openMfaManageModal(fresh);
+            } else {
+                showNotification("فشل إعادة التسمية.");
+            }
+        } catch (err) {
+            console.error(err);
+            showNotification("حدث خطأ أثناء إعادة التسمية.");
+        }
+    };
+
+    const onRevoke = async (ev) => {
+        const deviceId = ev.currentTarget.dataset.deviceId;
+        if (!confirm("هل أنتِ متأكدة من إلغاء تفعيل هذا الجهاز؟")) return;
+        const pw = prompt("أدخلي كلمة المرور لتأكيد إلغاء تفعيل الجهاز:");
+        if (!pw) return;
+        try {
+            const res = await window.MFA.deleteMfaDevice(userData.uid, deviceId, pw);
+            if (res && res.ok) {
+                showNotification("تم إلغاء تفعيل الجهاز.");
+                const fresh = await window.MFA.getMfaRecord(userData.uid);
+                if (!fresh) {
+                    cleanup();
+                    await renderMfaProfileSection();
+                    return;
+                }
+                openMfaManageModal(fresh);
+            } else {
+                showNotification("فشل إلغاء تفعيل الجهاز.");
+            }
+        } catch (err) {
+            console.error(err);
+            showNotification("حدث خطأ أثناء إلغاء تفعيل الجهاز.");
+        }
+    };
+
+    closeBtn.addEventListener("click", onClose);
+    regenBtn.addEventListener("click", onRegen);
+    delBtn.addEventListener("click", onDelete);
+
+    // attach per-device listeners
+    devicesContainer.querySelectorAll(".mfa-device-rename").forEach((b) => b.addEventListener("click", onRename));
+    devicesContainer.querySelectorAll(".mfa-device-revoke").forEach((b) => b.addEventListener("click", onRevoke));
 }
 
 function escapeAttr(s) {
@@ -2691,6 +3527,36 @@ function logout() {
     showNotification("تم تسجيل الخروج.");
 }
 
+async function testOpenMfaModal() {
+    try {
+        if (!userData) {
+            alert("يجب تسجيل الدخول أولاً لاختبار المصادقة الثنائية.");
+            return;
+        }
+        // Prefer any available password from the registration payload or the auth form
+        let pw = null;
+        try {
+            if (typeof pendingRegistrationPayload !== "undefined" && pendingRegistrationPayload && pendingRegistrationPayload.password) {
+                pw = pendingRegistrationPayload.password;
+            }
+        } catch (e) {}
+        if (!pw) {
+            const formPw = getAuthPassword();
+            if (formPw) pw = formPw;
+        }
+        // fallback to prompt only if we couldn't find a password in the form/payload
+        if (!pw) {
+            pw = prompt("أدخلي كلمة المرور لاختبار تفعيل المصادقة الثنائية:");
+        }
+        if (!pw) return;
+        console.log("[MFA] testOpenMfaModal invoking setup", { uid: userData.uid });
+        await showMfaSetupModal(userData.uid, pw, userData.email);
+    } catch (err) {
+        console.error("[MFA] testOpenMfaModal error", err);
+        showNotification("تعذّر فتح اختبار المصادقة الثنائية.");
+    }
+}
+
 function getRouterHashForPage(pageId) {
     if (pageId === "home-page") return "#/home";
     if (pageId === "profile-page") return "#/profile";
@@ -2747,6 +3613,14 @@ function applyPageView(pageId) {
 
     if (pageId === "events-page" && currentCollegeForEvents) {
         refreshEventsListUI().catch(console.error);
+    }
+
+    if (pageId === "profile-page") {
+        try {
+            void renderMfaProfileSection();
+        } catch (err) {
+            console.warn("renderMfaProfileSection error", err);
+        }
     }
 }
 
