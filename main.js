@@ -17,6 +17,7 @@ const ADMIN_ACCOUNTS_SEED_VERSION = "v1";
 const REQUEST_STATUS_PENDING = "pending";
 const REQUEST_STATUS_APPROVED = "approved";
 const REQUEST_STATUS_WAITLISTED = "waitlisted";
+const REQUEST_STATUS_COMPLETED = "completed";
 const REQUEST_STATUS_WITHDRAWN = "withdrawn";
 const STUDENT_EMAIL_DOMAIN = "pnu.edu.sa";
 const DB_SYNC_CHANNEL_NAME = "athar_db_sync";
