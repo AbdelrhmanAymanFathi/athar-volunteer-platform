@@ -82,6 +82,21 @@
           تسجيل الدخول
         </button>
       </form>
+      <div id="otp-verification-panel" class="telegram-otp-panel auth-register-only" hidden>
+        <h3 class="telegram-otp-panel__title">التحقق عبر تيليجرام</h3>
+        <p id="otp-status-text" class="telegram-otp-panel__text"></p>
+        <a id="otp-open-bot-link" class="telegram-otp-panel__link" href="#" target="_blank" rel="noopener noreferrer" hidden>
+          فتح بوت تيليجرام واستلام الرمز
+        </a>
+        <div class="input-group telegram-otp-panel__field">
+          <label for="otp-code">رمز التحقق</label>
+          <input type="text" id="otp-code" placeholder="أدخلي الرمز المرسل في تيليجرام" inputmode="numeric" maxlength="6" dir="ltr" />
+        </div>
+        <div class="telegram-otp-panel__actions">
+          <button type="button" class="btn-modal-secondary" id="otp-cancel-btn">إلغاء</button>
+          <button type="button" class="btn-login telegram-otp-panel__verify" id="otp-verify-btn">تأكيد الرمز</button>
+        </div>
+      </div>
       <button type="button" id="forgot-password-trigger" class="auth-link-btn" onclick="toggleForgotPasswordPanel()">
         هل نسيت كلمة المرور؟
       </button>

@@ -105,6 +105,24 @@ let dbJsonAutoSaveTimer = null;
 let dbJsonAutoSaveInFlight = false;
 let dbJsonAutoSaveQueued = false;
 
+const TELEGRAM_OTP_CONFIG = {
+    apiBase: window.ATHAR_TELEGRAM_OTP_API_BASE || "http://localhost:8787",
+};
+
+const FIREBASE_CONFIG = window.FIREBASE_CONFIG || {
+    apiKey: "YOUR_FIREBASE_API_KEY",
+    authDomain: "YOUR_FIREBASE_AUTH_DOMAIN",
+    projectId: "YOUR_FIREBASE_PROJECT_ID",
+    appId: "YOUR_FIREBASE_APP_ID",
+};
+
+let firebaseAppInstance = null;
+let firebasePhoneAuth = null;
+let firebaseRecaptchaVerifier = null;
+let firebaseConfirmationResult = null;
+let pendingRegistrationPayload = null;
+let pendingTelegramOtpSessionId = "";
+
 const DB_SYNC_TAB_ID =
     (typeof crypto !== "undefined" && crypto.randomUUID
         ? crypto.randomUUID()
@@ -258,6 +276,7 @@ function getOtpPanelElements() {
         input: document.getElementById("otp-code"),
         statusText: document.getElementById("otp-status-text"),
         verifyButton: document.getElementById("otp-verify-btn"),
+        openBotLink: document.getElementById("otp-open-bot-link"),
     };
 }
 
@@ -295,10 +314,21 @@ function setOtpPanelVisible(isVisible, message = "") {
 function resetOtpFlow() {
     firebaseConfirmationResult = null;
     pendingRegistrationPayload = null;
+    pendingTelegramOtpSessionId = "";
     setOtpPanelVisible(false);
-    const otpInput = document.getElementById("otp-code");
-    if (otpInput) otpInput.value = "";
+    const { input, openBotLink, statusText } = getOtpPanelElements();
+    if (input) input.value = "";
+    if (statusText) statusText.textContent = "";
+    if (openBotLink) {
+        openBotLink.hidden = true;
+        openBotLink.removeAttribute("href");
+    }
 }
+
+function getSelectedPhoneCountryCode() {
+    return "+966";
+}
+
 function formatPhoneForFirebase(phone, selectedCountryCode) {
     const rawValue = String(phone || "").trim();
     const normalizedValue = rawValue.replace(/[\s()\-]/g, "");
@@ -384,6 +414,104 @@ function getFirebasePhoneAuthErrorMessage(error, phase = "send") {
     }
 
     return "تعذّر إرسال رمز التحقق. تحققي من رقم الجوال وحاولي مرة أخرى.";
+}
+
+function isTelegramOtpConfigured() {
+    return Boolean(TELEGRAM_OTP_CONFIG.apiBase);
+}
+
+function getTelegramOtpErrorMessage(errorCode, phase = "request") {
+    const code = String(errorCode || "").trim().toLowerCase();
+
+    if (phase === "verify") {
+        if (code === "invalid-code") return "رمز التحقق من تيليجرام غير صحيح.";
+        if (code === "session-expired") return "انتهت صلاحية جلسة التحقق. أعيدي طلب رمز جديد.";
+        if (code === "too-many-attempts") return "تم تجاوز عدد المحاولات المسموح. أعيدي طلب رمز جديد.";
+        return "تعذّر التحقق من الرمز عبر تيليجرام.";
+    }
+
+    if (code === "telegram-not-configured") {
+        return "خدمة تيليجرام غير مهيأة بعد. شغّلي خادم Telegram OTP وأضيفي بيانات البوت أولًا.";
+    }
+    return "تعذّر بدء التحقق عبر تيليجرام. حاولي مرة أخرى.";
+}
+
+function updateOtpBotLink(botUrl) {
+    const { openBotLink } = getOtpPanelElements();
+    if (!openBotLink) return;
+    if (!botUrl) {
+        openBotLink.hidden = true;
+        openBotLink.removeAttribute("href");
+        return;
+    }
+    openBotLink.href = botUrl;
+    openBotLink.hidden = false;
+}
+
+async function requestTelegramOtpSession(payload) {
+    const response = await fetch(`${TELEGRAM_OTP_CONFIG.apiBase}/api/telegram/request-otp`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+            email: payload.email,
+            phone: payload.phone,
+            label: payload.email,
+        }),
+    });
+
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.ok) {
+        throw new Error(result.error || "request-otp-failed");
+    }
+    return result;
+}
+
+async function verifyTelegramOtpAndRegister() {
+    const { input, verifyButton, statusText } = getOtpPanelElements();
+    const code = String(input?.value || "").trim();
+
+    if (!pendingRegistrationPayload || !pendingTelegramOtpSessionId) {
+        showNotification("ابدئي التسجيل أولًا ثم افتحي بوت تيليجرام للحصول على الرمز.");
+        return;
+    }
+    if (!code) {
+        showNotification("أدخلي رمز التحقق المرسل في تيليجرام.");
+        return;
+    }
+
+    setButtonLoadingState(verifyButton, true, "تأكيد الرمز", "جاري التحقق...");
+    try {
+        const response = await fetch(`${TELEGRAM_OTP_CONFIG.apiBase}/api/telegram/verify-otp`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+                sessionId: pendingTelegramOtpSessionId,
+                code,
+            }),
+        });
+
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || !result.ok) {
+            throw new Error(result.error || "verify-otp-failed");
+        }
+
+        await finalizeRegisterAfterPhoneVerification({
+            provider: "telegram",
+            uid: result.telegramUserId,
+            username: result.telegramUsername,
+            chatId: result.chatId,
+        });
+    } catch (error) {
+        const message = getTelegramOtpErrorMessage(error?.message, "verify");
+        if (statusText) statusText.textContent = message;
+        showNotification(message);
+    } finally {
+        setButtonLoadingState(verifyButton, false, "تأكيد الرمز", "جاري التحقق...");
+    }
 }
 
 async function ensureFirebasePhoneAuth() {
@@ -485,6 +613,9 @@ async function finalizeRegisterAfterPhoneVerification(verifiedPhoneData) {
         return;
     }
 
+    const provider = verifiedPhoneData?.provider || "phone";
+    const verifiedAt = new Date().toISOString();
+
     const pwdHash = await hashPassword(payload.password);
     const db = await loadDb();
     const existing = findUserByEmail(db, payload.email);
@@ -502,10 +633,15 @@ async function finalizeRegisterAfterPhoneVerification(verifiedPhoneData) {
     const row = {
         ...buildUserPayload(uid, payload.fullname, payload.email, payload.phone, "", payload.role),
         pwdHash,
-        phoneVerified: true,
-        phoneVerifiedAt: new Date().toISOString(),
-        verifiedPhoneNumber: payload.firebasePhoneNumber,
-        firebasePhoneUid: verifiedPhoneData?.uid || "",
+        verificationMethod: provider,
+        verificationVerifiedAt: verifiedAt,
+        phoneVerified: provider === "phone",
+        phoneVerifiedAt: provider === "phone" ? verifiedAt : "",
+        verifiedPhoneNumber: provider === "phone" ? payload.firebasePhoneNumber : "",
+        firebasePhoneUid: provider === "phone" ? verifiedPhoneData?.uid || "" : "",
+        telegramUserId: provider === "telegram" ? String(verifiedPhoneData?.uid || "") : "",
+        telegramUsername: provider === "telegram" ? String(verifiedPhoneData?.username || "") : "",
+        telegramChatId: provider === "telegram" ? String(verifiedPhoneData?.chatId || "") : "",
     };
 
     db.users.push(row);
@@ -1957,6 +2093,9 @@ function setAuthMode(mode) {
     if (!wrap || !extra) return;
 
     const isRegister = mode === "register";
+    if (!isRegister) {
+        resetOtpFlow();
+    }
     wrap.dataset.authMode = isRegister ? "register" : "login";
     extra.hidden = !isRegister;
     syncAuthEmailField(mode);
@@ -2099,51 +2238,18 @@ async function handleLogin() {
 }
 
 async function handleRegister() {
-    const fullname = document.getElementById("reg-fullname").value.trim();
-    const names = fullname.split(/\s+/);
-    if (names.length < 3) {
-        showNotification("مطلوب على الأقل ثلاثة أسماء");
+    const payload = buildPendingRegistrationPayload();
+    if (!payload) return;
+    if (!isTelegramOtpConfigured()) {
+        showNotification("فعّلي خادم Telegram OTP أولًا ثم أعيدي المحاولة.");
         return;
     }
 
-    const emailInput = getAuthEmailInput();
-    const password = getAuthPassword();
-    const phone = document.getElementById("reg-phone").value.trim();
-    const email = normalizeEmailInput(emailInput);
-    const role = resolveRoleFromEmail(email);
-
-    if (!emailInput) {
-        showNotification("أدخلي الرقم الجامعي.");
-        return;
-    }
-    if (!isValidStudentEmailLocalPart(emailInput)) {
-        showNotification("يجب إدخال الرقم الجامعي من 9 أرقام.");
-        return;
-    }
-    if (!isStrongPassword(password)) {
-        showNotification(
-            "كلمة المرور يجب أن تكون 8 أحرف على الأقل وتحتوي على حرف كبير وحرف صغير ورقم ورمز خاص."
-        );
-        return;
-    }
-    if (!phone) {
-        showNotification("أدخلي رقم الجوال.");
-        return;
-    }
-
-    if (role === "admin") {
-        showNotification(
-            "حساب الإدارة موجود أساساً. استخدمي «تسجيل الدخول»."
-        );
-        return;
-    }
-
-    showLoader(true);
+    setAuthSubmitLoading(true, "جاري تجهيز التحقق عبر تيليجرام...");
 
     try {
-        const pwdHash = await hashPassword(password);
         const db = await loadDb();
-        const existing = findUserByEmail(db, email);
+        const existing = findUserByEmail(db, payload.email);
 
         if (existing) {
             showNotification(
@@ -2152,29 +2258,24 @@ async function handleRegister() {
             return;
         }
 
-        const uid = newUid();
-        const row = {
-            ...buildUserPayload(uid, fullname, email, phone, "", role),
-            pwdHash,
-        };
-        db.users.push(row);
-        await saveDb(db);
-        userData = toPublicUser(row);
-
-        if (userData && userData.role !== "admin") {
-            subscribeCurrentUserHours(userData.uid);
-        } else {
-            clearHoursSubscription();
-        }
-
-        startApp();
+        pendingRegistrationPayload = payload;
+        const telegramSession = await requestTelegramOtpSession(payload);
+        pendingTelegramOtpSessionId = telegramSession.sessionId;
+        updateOtpBotLink(telegramSession.botUrl);
+        setOtpPanelVisible(
+            true,
+            "افتحي بوت تيليجرام من الزر التالي، ابدئي المحادثة، ثم أدخلي الرمز الذي سيصلك هناك."
+        );
+        showNotification("تم تجهيز جلسة التحقق عبر تيليجرام.");
     } catch (err) {
         console.error(err);
-        showNotification(
-            "تعذّر إنشاء الحساب. تأكدي أن المتصفح يدعم IndexedDB."
-        );
+        pendingRegistrationPayload = null;
+        pendingTelegramOtpSessionId = "";
+        updateOtpBotLink("");
+        setOtpPanelVisible(false);
+        showNotification(getTelegramOtpErrorMessage(err?.message, "request"));
     } finally {
-        showLoader(false);
+        setAuthSubmitLoading(false, "جاري تجهيز التحقق عبر تيليجرام...");
     }
 }
 
@@ -3881,6 +3982,14 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("chat-send-btn")?.addEventListener("click", sendChatMessage);
     document.getElementById("chat-input")?.addEventListener("keypress", (e) => {
         if (e.key === "Enter") sendChatMessage();
+    });
+    document.getElementById("otp-verify-btn")?.addEventListener("click", verifyTelegramOtpAndRegister);
+    document.getElementById("otp-cancel-btn")?.addEventListener("click", resetOtpFlow);
+    document.getElementById("otp-code")?.addEventListener("keypress", (e) => {
+        if (e.key === "Enter") {
+            e.preventDefault();
+            verifyTelegramOtpAndRegister();
+        }
     });
 
     // استعادة الجلسة من localStorage

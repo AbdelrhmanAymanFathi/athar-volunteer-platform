@@ -1,0 +1,8 @@
+{
+  "name": "athar-volunteer-platform",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "telegram-otp": "node telegram-otp-server.mjs"
+  }
+}

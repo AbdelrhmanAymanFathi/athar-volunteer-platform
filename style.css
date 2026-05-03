@@ -649,6 +649,76 @@
           padding-inline: 22px;
       }
 
+      .telegram-otp-panel {
+          margin-top: 16px;
+          padding: 18px;
+          border-radius: 18px;
+          background: #f6fbff;
+          border: 1px solid rgba(0, 77, 64, 0.14);
+          text-align: right;
+      }
+
+      .telegram-otp-panel__title {
+          margin: 0 0 8px;
+          color: var(--primary);
+          font-size: 1.02rem;
+      }
+
+      .telegram-otp-panel__text {
+          margin: 0 0 12px;
+          color: #526464;
+          line-height: 1.7;
+          font-size: 0.92rem;
+      }
+
+      .telegram-otp-panel__link {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 100%;
+          margin-bottom: 12px;
+          padding: 12px 14px;
+          border-radius: 12px;
+          background: #229ed9;
+          color: #fff;
+          text-decoration: none;
+          font-weight: 700;
+          transition: background 0.25s ease, transform 0.25s ease;
+      }
+
+      .telegram-otp-panel__link:hover {
+          background: #1788be;
+          transform: translateY(-1px);
+      }
+
+      .telegram-otp-panel__field {
+          margin-bottom: 12px;
+      }
+
+      .telegram-otp-panel__actions {
+          display: flex;
+          gap: 12px;
+          flex-wrap: wrap;
+          justify-content: flex-end;
+      }
+
+      .telegram-otp-panel__verify {
+          width: auto;
+          margin-top: 0;
+          padding-inline: 22px;
+      }
+
+      @media (max-width: 700px) {
+          .telegram-otp-panel__actions {
+              flex-direction: column-reverse;
+          }
+
+          .telegram-otp-panel__verify,
+          .telegram-otp-panel__actions .btn-modal-secondary {
+              width: 100%;
+          }
+      }
+
       /* نافذة نبذة عنا */
       #about-modal {
           display: none;
