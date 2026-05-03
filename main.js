@@ -21,6 +21,7 @@ const REQUEST_STATUS_COMPLETED = "completed";
 const REQUEST_STATUS_WITHDRAWN = "withdrawn";
 const STUDENT_EMAIL_DOMAIN = "pnu.edu.sa";
 const DB_SYNC_CHANNEL_NAME = "athar_db_sync";
+const DB_SYNC_STORAGE_KEY = "athar_db_sync_storage";
 const EVENT_MEMBERS_EXPANDED_STORAGE_KEY = "athar_event_members_expanded_state";
 
 const COLLEGE_CATALOG = [
@@ -28,6 +29,7 @@ const COLLEGE_CATALOG = [
         key: "computer",
         name: "الحاسب",
         displayName: "كلية الحاسب",
+        icon: "💻",
         adminEmail: "pnu31@pnu.edu.sa",
         adminPassword: "P@ssw0rd31",
     },
