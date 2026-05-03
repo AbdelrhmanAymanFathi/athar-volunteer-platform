@@ -116,6 +116,8 @@ let adminUnsub = null;
 let hoursSyncHandler = null;
 let adminSyncHandler = null;
 let eventMembersExpandedState = new Map();
+let forgotPasswordVerifiedEmail = "";
+let forgotPasswordVerifiedUserId = "";
 
 /** كلية الفعاليات المعروضة حالياً */
 let currentCollegeForEvents = "";
@@ -1874,7 +1876,9 @@ function getAuthPassword() {
 function getForgotPasswordValues() {
     const newPasswordEl = document.getElementById("forgot-password-new");
     const confirmPasswordEl = document.getElementById("forgot-password-confirm");
+    const otpEl = document.getElementById("forgot-password-otp");
     return {
+        otp: otpEl ? otpEl.value.trim() : "",
         newPassword: newPasswordEl ? newPasswordEl.value : "",
         confirmPassword: confirmPasswordEl ? confirmPasswordEl.value : "",
     };
@@ -1898,10 +1902,44 @@ function syncAuthEmailField(mode) {
 }
 
 function clearForgotPasswordForm() {
+    const otpEl = document.getElementById("forgot-password-otp");
+    const newPasswordEl = document.getElementById("forgot-password-new");
+    const confirmPasswordEl = document.getElementById("forgot-password-confirm");
+    if (otpEl) otpEl.value = "";
+    if (newPasswordEl) newPasswordEl.value = "";
+    if (confirmPasswordEl) confirmPasswordEl.value = "";
+    forgotPasswordVerifiedEmail = "";
+    forgotPasswordVerifiedUserId = "";
+    renderForgotPasswordState(false);
+}
+
+function renderForgotPasswordState(isVerified) {
+    const hint = document.getElementById("forgot-password-hint");
+    const otpEl = document.getElementById("forgot-password-otp");
+    const newFields = document.getElementById("forgot-password-new-fields");
+    const submitBtn = document.getElementById("forgot-password-submit");
+    if (hint) {
+        hint.textContent = isVerified
+            ? "تم التحقق من البريد ورمز المصادقة. أدخلي كلمة المرور الجديدة ثم أكّديها."
+            : "أدخلي البريد الجامعي بالأعلى ثم رمز المصادقة الثنائية للتحقق أولاً.";
+    }
+    if (otpEl) otpEl.disabled = Boolean(isVerified);
+    if (newFields) newFields.hidden = !isVerified;
+    if (submitBtn) submitBtn.textContent = isVerified ? "تغيير كلمة المرور" : "تحقق";
+}
+
+function resetForgotPasswordVerificationState(shouldClearOtp = false) {
+    forgotPasswordVerifiedEmail = "";
+    forgotPasswordVerifiedUserId = "";
+    if (shouldClearOtp) {
+        const otpEl = document.getElementById("forgot-password-otp");
+        if (otpEl) otpEl.value = "";
+    }
     const newPasswordEl = document.getElementById("forgot-password-new");
     const confirmPasswordEl = document.getElementById("forgot-password-confirm");
     if (newPasswordEl) newPasswordEl.value = "";
     if (confirmPasswordEl) confirmPasswordEl.value = "";
+    renderForgotPasswordState(false);
 }
 
 function toggleForgotPasswordPanel(forceOpen) {
@@ -1914,6 +1952,8 @@ function toggleForgotPasswordPanel(forceOpen) {
 
     if (!shouldOpen) {
         clearForgotPasswordForm();
+    } else {
+        renderForgotPasswordState(Boolean(forgotPasswordVerifiedEmail));
     }
 }
 
@@ -1926,6 +1966,15 @@ function syncForgotPasswordVisibility(mode) {
     if (panel && isRegister) {
         panel.hidden = true;
         clearForgotPasswordForm();
+    }
+}
+
+function syncForgotPasswordVerificationWithEmail() {
+    const panel = document.getElementById("forgot-password-panel");
+    if (!panel || panel.hidden || !forgotPasswordVerifiedEmail) return;
+    const currentEmail = normalizeEmailInput(getAuthEmailInput());
+    if (currentEmail !== forgotPasswordVerifiedEmail) {
+        resetForgotPasswordVerificationState(false);
     }
 }
 
@@ -1990,7 +2039,9 @@ async function handleForgotPasswordReset() {
 
     const emailInput = getAuthEmailInput();
     const email = normalizeEmailInput(emailInput);
-    const { newPassword, confirmPassword } = getForgotPasswordValues();
+    const { otp, newPassword, confirmPassword } = getForgotPasswordValues();
+    const isVerifiedStep =
+        forgotPasswordVerifiedEmail === email && Boolean(forgotPasswordVerifiedUserId);
 
     if (!emailInput) {
         showNotification("أدخلي الرقم الجامعي أولاً.");
@@ -2000,15 +2051,22 @@ async function handleForgotPasswordReset() {
         showNotification("أدخلي الرقم الجامعي الصحيح أولاً.");
         return;
     }
-    if (!isStrongPassword(newPassword)) {
-        showNotification(
-            "كلمة المرور الجديدة يجب أن تكون 8 أحرف على الأقل وتحتوي على حرف كبير وحرف صغير ورقم ورمز خاص."
-        );
-        return;
-    }
-    if (newPassword !== confirmPassword) {
-        showNotification("كلمتا المرور غير متطابقتين.");
-        return;
+    if (!isVerifiedStep) {
+        if (!otp) {
+            showNotification("أدخلي رمز المصادقة الثنائية أولاً.");
+            return;
+        }
+    } else {
+        if (!isStrongPassword(newPassword)) {
+            showNotification(
+                "كلمة المرور الجديدة يجب أن تكون 8 أحرف على الأقل وتحتوي على حرف كبير وحرف صغير ورقم ورمز خاص."
+            );
+            return;
+        }
+        if (newPassword !== confirmPassword) {
+            showNotification("كلمتا المرور غير متطابقتين.");
+            return;
+        }
     }
 
     showLoader(true);
@@ -2016,9 +2074,42 @@ async function handleForgotPasswordReset() {
     try {
         const db = await loadDb();
         const existing = findUserByEmail(db, email);
-        if (!existing) {
-            showNotification("لا يوجد حساب بهذا الرقم الجامعي.");
+
+        if (!isVerifiedStep) {
+            const verifyResult = existing && window.MFA
+                ? await window.MFA.verifyForRecovery(existing.uid, existing.email, otp)
+                : null;
+
+            if (!verifyResult || !verifyResult.ok) {
+                showNotification("تعذّر التحقق من بيانات الاستعادة.");
+                return;
+            }
+
+            forgotPasswordVerifiedEmail = email;
+            forgotPasswordVerifiedUserId = existing.uid;
+            renderForgotPasswordState(true);
+            document.getElementById("forgot-password-new")?.focus();
+            showNotification("تم التحقق. أدخلي كلمة المرور الجديدة.");
             return;
+        }
+
+        if (!existing || existing.uid !== forgotPasswordVerifiedUserId) {
+            resetForgotPasswordVerificationState(true);
+            showNotification("تعذّر التحقق من بيانات الاستعادة.");
+            return;
+        }
+
+        if (window.MFA) {
+            const rewrapResult = await window.MFA.rewrapForPasswordReset(
+                existing.uid,
+                existing.email,
+                newPassword
+            );
+            if (!rewrapResult || !rewrapResult.ok) {
+                resetForgotPasswordVerificationState(true);
+                showNotification("تعذّر التحقق من بيانات الاستعادة.");
+                return;
+            }
         }
 
         existing.pwdHash = await hashPassword(newPassword);
@@ -2183,6 +2274,15 @@ function startApp() {
     localStorage.setItem("athar_user_session", JSON.stringify(userData));
     restoreEventMembersExpandedState();
 
+    if (window.MFA && userData?.email) {
+        const authPassword = getAuthPassword();
+        if (authPassword) {
+            window.MFA
+                .ensureRecoveryAccess(userData.uid, authPassword, userData.email)
+                .catch((err) => console.warn("MFA recovery migration skipped", err));
+        }
+    }
+
     document.getElementById("login-wrapper").style.display = "none";
     document.getElementById("about-modal").style.display = "flex";
 
@@ -2260,7 +2360,13 @@ async function showMfaSetupModal(userId, password, accountLabel) {
     let enrollResult;
     try {
         console.log("[MFA] calling enrollForUser");
-        enrollResult = await window.MFA.enrollForUser(userId, password, accountLabel || userId, "Athar");
+        enrollResult = await window.MFA.enrollForUser(
+            userId,
+            password,
+            accountLabel || userId,
+            "Athar",
+            accountLabel || userId
+        );
         console.log("[MFA] enrollForUser returned", enrollResult && { provisioningUri: enrollResult.provisioningUri });
     } catch (err) {
         console.error("MFA enroll failed", err);
@@ -3842,10 +3948,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const authEmailEl = document.getElementById("reg-email");
     if (authEmailEl) {
-        authEmailEl.addEventListener("input", sanitizeStudentIdInput);
+        authEmailEl.addEventListener("input", () => {
+            sanitizeStudentIdInput();
+            syncForgotPasswordVerificationWithEmail();
+        });
     }
 
-    ["forgot-password-new", "forgot-password-confirm"].forEach((id) => {
+    ["forgot-password-otp", "forgot-password-new", "forgot-password-confirm"].forEach((id) => {
         const el = document.getElementById(id);
         if (!el) return;
         el.addEventListener("keydown", (e) => {

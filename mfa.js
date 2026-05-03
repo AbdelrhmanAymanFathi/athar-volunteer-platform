@@ -2,6 +2,8 @@
   // Client-side MFA utilities with multi-device support.
   // Exposes window.MFA with async functions.
 
+  const RECOVERY_KEY_PEPPER = "athar_mfa_recovery_v1";
+
   function bufToBase64(buf) {
     const bytes = new Uint8Array(buf);
     let binary = "";
@@ -104,6 +106,14 @@
     return key;
   }
 
+  function normalizeRecoveryIdentifier(value) {
+    return String(value || "").trim().toLowerCase();
+  }
+
+  function buildRecoveryPassphrase(userId, recoveryIdentifier) {
+    return `${RECOVERY_KEY_PEPPER}:${userId}:${normalizeRecoveryIdentifier(recoveryIdentifier)}`;
+  }
+
   async function encryptSecretWithPassword(secretUint8, password, iterations = 100000) {
     const salt = randomBytes(16);
     const saltB64 = bufToBase64(salt);
@@ -127,6 +137,16 @@
     } catch (err) {
       return null;
     }
+  }
+
+  async function encryptSecretForRecovery(secretUint8, userId, recoveryIdentifier, iterations = 100000) {
+    const passphrase = buildRecoveryPassphrase(userId, recoveryIdentifier);
+    return encryptSecretWithPassword(secretUint8, passphrase, iterations);
+  }
+
+  async function decryptSecretForRecovery(cipherB64, userId, recoveryIdentifier, saltB64, ivB64, iterations = 100000) {
+    const passphrase = buildRecoveryPassphrase(userId, recoveryIdentifier);
+    return decryptSecretWithPassword(cipherB64, passphrase, saltB64, ivB64, iterations);
   }
 
   function intToBytes(num) {
@@ -241,11 +261,16 @@
     return await idbDeleteMfaRecord(db, userId);
   }
 
-  async function enrollForUser(userId, password, deviceName, issuerName) {
+  async function enrollForUser(userId, password, deviceName, issuerName, recoveryIdentifier) {
     console.log("[MFA] enrollForUser called", { userId, deviceName, issuerName });
     const { bytes, base32 } = generateSecretBase32(20);
     const uri = makeProvisioningUri(issuerName || "Athar", deviceName || userId, base32);
     const encResult = await encryptSecretWithPassword(bytes.buffer, password);
+    const recoveryEncResult = await encryptSecretForRecovery(
+      bytes.buffer,
+      userId,
+      recoveryIdentifier || deviceName || userId
+    );
 
     let record = await getMfaRecord(userId);
     let isNew = false;
@@ -260,6 +285,10 @@
       salt: encResult.salt,
       iv: encResult.iv,
       iterations: encResult.iterations,
+      recoveryCipher: recoveryEncResult.cipher,
+      recoverySalt: recoveryEncResult.salt,
+      recoveryIv: recoveryEncResult.iv,
+      recoveryIterations: recoveryEncResult.iterations,
       algo: "TOTP",
       digits: 6,
       period: 30,
@@ -348,6 +377,114 @@
     return { ok: false, method: "invalid" };
   }
 
+  async function verifyForRecovery(userId, recoveryIdentifier, code) {
+    const record = await getMfaRecord(userId);
+    if (!record) return { ok: false, reason: "no_mfa" };
+
+    const devices = record.devices || [];
+    let anyRecoveryCapableDevice = false;
+
+    for (let i = 0; i < devices.length; i++) {
+      const d = devices[i];
+      if (!d.recoveryCipher || !d.recoverySalt || !d.recoveryIv) {
+        continue;
+      }
+      anyRecoveryCapableDevice = true;
+      const secretBytes = await decryptSecretForRecovery(
+        d.recoveryCipher,
+        userId,
+        recoveryIdentifier,
+        d.recoverySalt,
+        d.recoveryIv,
+        d.recoveryIterations
+      );
+      if (!secretBytes) {
+        continue;
+      }
+      const secretBase32 = base32Encode(secretBytes);
+      const ok = await totpVerifyBase32(secretBase32, String(code || "").trim(), d.digits || 6, d.period || 30, 1);
+      if (ok) {
+        return { ok: true, method: "totp", deviceId: d.deviceId };
+      }
+    }
+
+    if (!anyRecoveryCapableDevice) return { ok: false, reason: "recovery_not_available" };
+    return { ok: false, reason: "invalid" };
+  }
+
+  async function ensureRecoveryAccess(userId, password, recoveryIdentifier) {
+    const record = await getMfaRecord(userId);
+    if (!record) return { ok: false, reason: "no_mfa" };
+
+    const devices = record.devices || [];
+    let updatedCount = 0;
+
+    for (let i = 0; i < devices.length; i++) {
+      const d = devices[i];
+      if (d.recoveryCipher && d.recoverySalt && d.recoveryIv) {
+        continue;
+      }
+      const secretBytes = await decryptSecretWithPassword(d.cipher, password, d.salt, d.iv, d.iterations);
+      if (!secretBytes) {
+        continue;
+      }
+      const recoveryEncResult = await encryptSecretForRecovery(
+        secretBytes.buffer,
+        userId,
+        recoveryIdentifier
+      );
+      d.recoveryCipher = recoveryEncResult.cipher;
+      d.recoverySalt = recoveryEncResult.salt;
+      d.recoveryIv = recoveryEncResult.iv;
+      d.recoveryIterations = recoveryEncResult.iterations;
+      updatedCount += 1;
+    }
+
+    if (updatedCount > 0) {
+      await putMfaRecord(record);
+    }
+
+    return { ok: true, updatedCount };
+  }
+
+  async function rewrapForPasswordReset(userId, recoveryIdentifier, newPassword) {
+    const record = await getMfaRecord(userId);
+    if (!record) return { ok: false, reason: "no_mfa" };
+
+    const devices = record.devices || [];
+    if (!devices.length) return { ok: false, reason: "no_devices" };
+
+    let updatedCount = 0;
+    for (let i = 0; i < devices.length; i++) {
+      const d = devices[i];
+      if (!d.recoveryCipher || !d.recoverySalt || !d.recoveryIv) {
+        continue;
+      }
+      const secretBytes = await decryptSecretForRecovery(
+        d.recoveryCipher,
+        userId,
+        recoveryIdentifier,
+        d.recoverySalt,
+        d.recoveryIv,
+        d.recoveryIterations
+      );
+      if (!secretBytes) {
+        continue;
+      }
+      const passwordEncResult = await encryptSecretWithPassword(secretBytes.buffer, newPassword);
+      d.cipher = passwordEncResult.cipher;
+      d.salt = passwordEncResult.salt;
+      d.iv = passwordEncResult.iv;
+      d.iterations = passwordEncResult.iterations;
+      updatedCount += 1;
+    }
+
+    if (!updatedCount) return { ok: false, reason: "recovery_failed" };
+
+    await putMfaRecord(record);
+    return { ok: true, updatedCount };
+  }
+
   async function getMfaDevices(userId) {
     const rec = await getMfaRecord(userId);
     if (!rec) return [];
@@ -396,6 +533,8 @@
     decryptSecretWithPassword,
     enrollForUser,
     verifyWithPassword,
+    verifyForRecovery,
+    ensureRecoveryAccess,
     getMfaRecord,
     getMfaDevices,
     deleteMfaRecord,
@@ -403,6 +542,7 @@
     renameMfaDevice,
     generateBackupCodes,
     regenerateBackupCodes,
+    rewrapForPasswordReset,
     totpVerifyBase32,
   };
 

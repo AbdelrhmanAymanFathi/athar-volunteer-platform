@@ -87,18 +87,24 @@
       </button>
       <div id="forgot-password-panel" class="forgot-password-panel" hidden>
         <h3 class="forgot-password-title">إعادة تعيين كلمة المرور</h3>
-        <p class="forgot-password-hint">سيتم تغيير كلمة المرور للحساب المرتبط بالبريد الجامعي الذي أدخلته بالأعلى.</p>
+        <p class="forgot-password-hint" id="forgot-password-hint">أدخلي البريد الجامعي بالأعلى ثم رمز المصادقة الثنائية للتحقق أولاً.</p>
         <div class="input-group">
-          <label for="forgot-password-new">كلمة المرور الجديدة</label>
-          <input type="password" id="forgot-password-new" placeholder="********" minlength="8" autocomplete="new-password" />
+          <label for="forgot-password-otp">رمز المصادقة الثنائية</label>
+          <input type="text" id="forgot-password-otp" placeholder="000000" inputmode="numeric" maxlength="12" autocomplete="one-time-code" dir="ltr" />
         </div>
-        <div class="input-group">
-          <label for="forgot-password-confirm">إعادة كتابة كلمة المرور الجديدة</label>
-          <input type="password" id="forgot-password-confirm" placeholder="********" minlength="8" autocomplete="new-password" />
+        <div id="forgot-password-new-fields" hidden>
+          <div class="input-group">
+            <label for="forgot-password-new">كلمة المرور الجديدة</label>
+            <input type="password" id="forgot-password-new" placeholder="********" minlength="8" autocomplete="new-password" />
+          </div>
+          <div class="input-group">
+            <label for="forgot-password-confirm">إعادة كتابة كلمة المرور الجديدة</label>
+            <input type="password" id="forgot-password-confirm" placeholder="********" minlength="8" autocomplete="new-password" />
+          </div>
         </div>
         <div class="forgot-password-actions">
           <button type="button" class="btn-modal-secondary" onclick="toggleForgotPasswordPanel(false)">إلغاء</button>
-          <button type="button" class="btn-login forgot-password-submit" onclick="handleForgotPasswordReset()">تغيير كلمة المرور</button>
+          <button type="button" class="btn-login forgot-password-submit" id="forgot-password-submit" onclick="handleForgotPasswordReset()">تحقق</button>
         </div>
       </div>
     </div>
@@ -126,7 +132,6 @@
       <button onclick="closeAbout()" class="btn-login" style="width: auto; padding: 12px 40px">
         ابدئي رحلتكِ الآن
       </button>
-      <button onclick="testOpenMfaModal()" class="btn-modal-secondary" style="width: auto; margin-top:12px">اختبار المصادقة الثنائية</button>
     </div>
   </div>
 
